@@ -4,6 +4,7 @@ import com.simlab.ug.grpc.*;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
@@ -35,6 +36,7 @@ public class ClientApplication extends Application {
     private TextField outputDirField;
     private VBox parametersContainer;
     private Map<String, Control> parameterControls = new HashMap<>();
+    private Map<String, CheckBox> parameterEnabledCheckboxes = new HashMap<>();
     
     private Button analyzeButton;
     private Button runButton;
@@ -361,25 +363,59 @@ public class ClientApplication extends Application {
             Platform.runLater(() -> {
                 parametersContainer.getChildren().clear();
                 parameterControls.clear();
+                parameterEnabledCheckboxes.clear();
                 
                 for (ScriptParameter param : analysis.getParametersList()) {
                     HBox paramBox = new HBox(10);
+                    paramBox.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+                    
+                    // Checkbox to enable/disable this parameter
+                    CheckBox enableCheckbox = new CheckBox();
+                    enableCheckbox.setSelected(true);
+                    enableCheckbox.setTooltip(new Tooltip("Uncheck to omit this parameter"));
+                    parameterEnabledCheckboxes.put(param.getName(), enableCheckbox);
+                    
                     Label label = new Label(param.getName() + ":");
-                    label.setPrefWidth(150);
+                    label.setPrefWidth(130);
                     
                     Control control = createParameterControl(param);
                     parameterControls.put(param.getName(), control);
                     
+                    // Bind control enable state to checkbox
+                    control.disableProperty().bind(enableCheckbox.selectedProperty().not());
+                    
                     Label descLabel = new Label(param.getDescription());
                     descLabel.setStyle("-fx-font-size: 10; -fx-text-fill: gray;");
+                    descLabel.setPrefWidth(200);
+                    descLabel.setWrapText(true);
                     
-                    paramBox.getChildren().addAll(label, control, descLabel);
+                    paramBox.getChildren().addAll(enableCheckbox, label, control, descLabel);
                     parametersContainer.getChildren().add(paramBox);
                 }
                 
                 if (analysis.getParametersList().isEmpty()) {
                     Label noParamsLabel = new Label("No parameters found in script");
                     parametersContainer.getChildren().add(noParamsLabel);
+                } else {
+                    // Add control buttons for parameter selection
+                    HBox controlBox = new HBox(10);
+                    Button selectAllBtn = new Button("Select All");
+                    selectAllBtn.setStyle("-fx-font-size: 11;");
+                    selectAllBtn.setOnAction(e -> {
+                        parameterEnabledCheckboxes.values().forEach(cb -> cb.setSelected(true));
+                    });
+                    
+                    Button deselectAllBtn = new Button("Deselect All");
+                    deselectAllBtn.setStyle("-fx-font-size: 11;");
+                    deselectAllBtn.setOnAction(e -> {
+                        parameterEnabledCheckboxes.values().forEach(cb -> cb.setSelected(false));
+                    });
+                    
+                    Label helpLabel = new Label("Tip: Uncheck parameters to omit them from the command");
+                    helpLabel.setStyle("-fx-font-style: italic; -fx-font-size: 11; -fx-text-fill: #666;");
+                    
+                    controlBox.getChildren().addAll(selectAllBtn, deselectAllBtn, helpLabel);
+                    parametersContainer.getChildren().add(0, controlBox);
                 }
                 
                 runButton.setDisable(false);
@@ -503,6 +539,14 @@ public class ClientApplication extends Application {
         for (Map.Entry<String, Control> entry : parameterControls.entrySet()) {
             String name = entry.getKey();
             Control control = entry.getValue();
+            
+            // Check if this parameter is enabled
+            CheckBox enabledCheckbox = parameterEnabledCheckboxes.get(name);
+            if (enabledCheckbox != null && !enabledCheckbox.isSelected()) {
+                // Skip this parameter if it's not enabled
+                continue;
+            }
+            
             ParameterValue.Builder param = ParameterValue.newBuilder().setName(name);
             
             if (control instanceof TextField) {

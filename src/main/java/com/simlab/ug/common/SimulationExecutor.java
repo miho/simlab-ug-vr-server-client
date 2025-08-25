@@ -62,7 +62,11 @@ public class SimulationExecutor {
                 state = SimulationState.RUNNING;
                 
                 // Create output directory
-                Path outDir = Paths.get(outputDirectory);
+                File outputDirFile = new File(outputDirectory);
+                if (!outputDirFile.isAbsolute()) {
+                    outputDirFile = new File(workingDirectory, outputDirectory);
+                }
+                Path outDir = outputDirFile.toPath();
                 Files.createDirectories(outDir);
                 
                 // Build command
@@ -73,7 +77,20 @@ public class SimulationExecutor {
                 
                 // Start process
                 ProcessBuilder pb = new ProcessBuilder(command);
-                pb.directory(new File(workingDirectory));
+                
+                // Change working directory to output directory if specified
+                // This ensures scripts that write to CWD will write to the correct location
+                if (outputDirectory != null && !outputDirectory.isEmpty()) {
+                    File outputDirFile = new File(outputDirectory);
+                    if (!outputDirFile.isAbsolute()) {
+                        outputDirFile = new File(workingDirectory, outputDirectory);
+                    }
+                    pb.directory(outputDirFile);
+                    listener.onLog(LogLevel.INFO, "Process working directory: " + outputDirFile.getAbsolutePath());
+                } else {
+                    pb.directory(new File(workingDirectory));
+                }
+                
                 pb.redirectErrorStream(false);
                 
                 // Set environment to ensure output directory is used
@@ -122,11 +139,25 @@ public class SimulationExecutor {
         List<String> command = new ArrayList<>();
         command.add(ugExecutable);
         command.add("-ex");
-        command.add(scriptPath);
+        
+        // Resolve script path relative to original working directory if needed
+        File scriptFile = new File(scriptPath);
+        if (!scriptFile.isAbsolute()) {
+            scriptFile = new File(workingDirectory, scriptPath);
+        }
+        command.add(scriptFile.getAbsolutePath());
         
         // Add parameters
+        boolean hasOutputDirParam = false;
         for (ParameterValue param : parameters) {
             command.add(param.getName());
+            
+            // Check if user already specified an output directory parameter
+            if (param.getName().equalsIgnoreCase("-outputDir") || 
+                param.getName().equalsIgnoreCase("-output") ||
+                param.getName().equalsIgnoreCase("-outdir")) {
+                hasOutputDirParam = true;
+            }
             
             if (param.hasStringValue()) {
                 command.add(param.getStringValue());
@@ -141,9 +172,14 @@ public class SimulationExecutor {
             }
         }
         
-        // Override output directory parameter if present
-        command.add("-outputDir");
-        command.add(outputDirectory);
+        // Only add output directory parameter if script supports it and user didn't specify it
+        // Some scripts may not support this parameter, so we rely on CWD change instead
+        if (!hasOutputDirParam && outputDirectory != null && !outputDirectory.isEmpty()) {
+            // Check if script likely supports -outputDir parameter
+            // This is optional - the CWD change is the primary mechanism
+            command.add("-outputDir");
+            command.add(".");  // Current directory since we're changing CWD
+        }
         
         return command;
     }

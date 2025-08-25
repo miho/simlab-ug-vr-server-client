@@ -37,6 +37,7 @@ public class ClientApplication extends Application {
     private VBox parametersContainer;
     private Map<String, Control> parameterControls = new HashMap<>();
     private Map<String, CheckBox> parameterEnabledCheckboxes = new HashMap<>();
+    private Map<String, ParameterType> parameterTypes = new HashMap<>();
     
     private Button analyzeButton;
     private Button runButton;
@@ -359,6 +360,7 @@ public class ClientApplication extends Application {
                 parametersContainer.getChildren().clear();
                 parameterControls.clear();
                 parameterEnabledCheckboxes.clear();
+                parameterTypes.clear();
                 
                 for (ScriptParameter param : analysis.getParametersList()) {
                     HBox paramBox = new HBox(10);
@@ -375,6 +377,7 @@ public class ClientApplication extends Application {
                     
                     Control control = createParameterControl(param);
                     parameterControls.put(param.getName(), control);
+                    parameterTypes.put(param.getName(), param.getType());
                     
                     // Bind control enable state to checkbox
                     control.disableProperty().bind(enableCheckbox.selectedProperty().not());
@@ -424,21 +427,42 @@ public class ClientApplication extends Application {
     private Control createParameterControl(ScriptParameter param) {
         switch (param.getType()) {
             case STRING:
-                TextField textField = new TextField(param.getStringValue());
+                // Use display value if available, otherwise use the parsed value
+                String stringValue = !param.getDisplayValue().isEmpty() 
+                    ? param.getDisplayValue() : param.getStringValue();
+                TextField textField = new TextField(stringValue);
                 textField.setPrefWidth(200);
                 return textField;
                 
             case INTEGER:
-                Spinner<Integer> intSpinner = new Spinner<>(-999999, 999999, param.getIntValue());
-                intSpinner.setEditable(true);
-                intSpinner.setPrefWidth(100);
-                return intSpinner;
+                // Use display value if available to preserve original format
+                String intValue = !param.getDisplayValue().isEmpty()
+                    ? param.getDisplayValue() : String.valueOf(param.getIntValue());
+                TextField intField = new TextField(intValue);
+                intField.setPrefWidth(100);
+                intField.setPromptText("Integer value");
+                // Add validation to ensure only integers are entered
+                intField.textProperty().addListener((obs, oldVal, newVal) -> {
+                    if (!newVal.matches("-?\\d*")) {
+                        intField.setText(oldVal);
+                    }
+                });
+                return intField;
                 
             case FLOAT:
-                Spinner<Double> doubleSpinner = new Spinner<>(-999999.0, 999999.0, param.getFloatValue(), 0.1);
-                doubleSpinner.setEditable(true);
-                doubleSpinner.setPrefWidth(100);
-                return doubleSpinner;
+                // Use display value to preserve the exact notation from the script
+                String floatValue = !param.getDisplayValue().isEmpty()
+                    ? param.getDisplayValue() : String.valueOf(param.getFloatValue());
+                TextField floatField = new TextField(floatValue);
+                floatField.setPrefWidth(120);
+                floatField.setPromptText("Numeric value");
+                // Add validation for numeric input (including scientific notation)
+                floatField.textProperty().addListener((obs, oldVal, newVal) -> {
+                    if (!newVal.matches("-?\\d*\\.?\\d*([eE][+-]?\\d*)?")) {
+                        floatField.setText(oldVal);
+                    }
+                });
+                return floatField;
                 
             case BOOLEAN:
                 CheckBox checkBox = new CheckBox();
@@ -553,17 +577,45 @@ public class ClientApplication extends Application {
             
             ParameterValue.Builder param = ParameterValue.newBuilder().setName(name);
             
-            if (control instanceof TextField) {
-                param.setStringValue(((TextField) control).getText());
+            // Get the parameter type we stored during analysis
+            ParameterType type = parameterTypes.get(name);
+            
+            if (control instanceof CheckBox) {
+                param.setBoolValue(((CheckBox) control).isSelected());
+            } else if (control instanceof TextField) {
+                String text = ((TextField) control).getText().trim();
+                
+                // Use the stored type to determine how to parse the value
+                if (type == ParameterType.INTEGER) {
+                    try {
+                        param.setIntValue(Integer.parseInt(text));
+                    } catch (NumberFormatException e) {
+                        // Try parsing as double then converting
+                        try {
+                            double val = Double.parseDouble(text);
+                            param.setIntValue((int) val);
+                        } catch (NumberFormatException e2) {
+                            param.setIntValue(0);
+                        }
+                    }
+                } else if (type == ParameterType.FLOAT) {
+                    try {
+                        param.setFloatValue(Double.parseDouble(text));
+                    } catch (NumberFormatException e) {
+                        param.setFloatValue(0.0);
+                    }
+                } else {
+                    // STRING or unknown
+                    param.setStringValue(text);
+                }
             } else if (control instanceof Spinner<?>) {
+                // Legacy support for any remaining spinners
                 Object value = ((Spinner<?>) control).getValue();
                 if (value instanceof Integer) {
                     param.setIntValue((Integer) value);
                 } else if (value instanceof Double) {
                     param.setFloatValue((Double) value);
                 }
-            } else if (control instanceof CheckBox) {
-                param.setBoolValue(((CheckBox) control).isSelected());
             }
             
             parameters.add(param.build());

@@ -43,6 +43,10 @@ public class LuaScriptParser {
         try {
             String scriptContent = readFile(scriptFile);
             
+            // Remove commented lines to avoid parsing parameters from comments
+            // This handles both -- style Lua comments and removes them
+            scriptContent = removeCommentedLines(scriptContent);
+            
             // Parse util.GetParamNumber calls first (numeric parameters)
             Matcher numberMatcher = UTIL_GET_PARAM_NUMBER.matcher(scriptContent);
             while (numberMatcher.find()) {
@@ -61,18 +65,51 @@ public class LuaScriptParser {
                         .setDescription(description != null ? description : "");
                 
                 try {
-                    defaultValue = defaultValue.trim();
-                    double value = Double.parseDouble(defaultValue);
-                    if (value == Math.floor(value)) {
-                        param.setType(ParameterType.INTEGER);
-                        param.setIntValue((int) value);
-                    } else {
+                    String originalValue = defaultValue.trim();
+                    
+                    // Store the original value for display
+                    param.setDisplayValue(originalValue);
+                    
+                    // Debug logging to track what we're parsing
+                    logger.debug("Parsing numeric parameter '{}' with original value: '{}'", paramName, originalValue);
+                    
+                    // Handle scientific notation (e.g., 2.e6, 1.5e-3, 2E6)
+                    // Lua allows notation like "2.e6" which Java doesn't recognize
+                    // Convert "number." to "number.0" before "e" or "E"
+                    String normalizedValue = originalValue.replaceAll("(\\d+)\\.(e|E)", "$1.0$2");
+                    
+                    // Also handle negative exponents and signs
+                    normalizedValue = normalizedValue.replaceAll("(\\d+\\.?\\d*)[eE]([+-]?\\d+)", "$1E$2");
+                    
+                    double value = Double.parseDouble(normalizedValue);
+                    
+                    // For scientific notation, always use FLOAT type to preserve the notation
+                    // This avoids issues with large integers being displayed incorrectly
+                    if (originalValue.toLowerCase().contains("e")) {
+                        // Scientific notation - keep as float even if it's a whole number
+                        param.setType(ParameterType.FLOAT);
                         param.setFloatValue(value);
+                        // display_value already set above with originalValue
+                    } else {
+                        // Regular number - use integer if it's a whole number within int range
+                        if (value == Math.floor(value) && !Double.isInfinite(value) 
+                            && value >= Integer.MIN_VALUE && value <= Integer.MAX_VALUE) {
+                            param.setType(ParameterType.INTEGER);
+                            param.setIntValue((int) value);
+                            // For non-scientific notation integers, update display value to show clean integer
+                            param.setDisplayValue(String.valueOf((int) value));
+                        } else {
+                            param.setType(ParameterType.FLOAT);
+                            param.setFloatValue(value);
+                            // display_value already set above with originalValue
+                        }
                     }
                 } catch (NumberFormatException e) {
-                    // Try to evaluate if it's a simple expression
-                    param.setType(ParameterType.INTEGER);
-                    param.setIntValue(3); // Default value
+                    // Try to evaluate if it's a simple expression or fallback to default
+                    logger.debug("Could not parse numeric value: " + defaultValue + " - " + e.getMessage());
+                    param.setType(ParameterType.FLOAT);
+                    param.setFloatValue(0.0); // Default value
+                    param.setDisplayValue(defaultValue); // Still preserve original
                 }
                 
                 parameters.add(param.build());
@@ -95,7 +132,9 @@ public class LuaScriptParser {
                         .setType(ParameterType.BOOLEAN)
                         .setDescription(description != null ? description : "");
                 
-                param.setBoolValue("true".equalsIgnoreCase(defaultValue.trim()));
+                String trimmedValue = defaultValue.trim();
+                param.setDisplayValue(trimmedValue);
+                param.setBoolValue("true".equalsIgnoreCase(trimmedValue));
                 
                 parameters.add(param.build());
             }
@@ -117,8 +156,12 @@ public class LuaScriptParser {
                         .setType(ParameterType.STRING)
                         .setDescription(description != null ? description : "");
                 
+                // Store original for display
+                String originalDefaultValue = defaultValue.trim();
+                param.setDisplayValue(originalDefaultValue);
+                
                 // Clean up default value
-                defaultValue = defaultValue.trim();
+                defaultValue = originalDefaultValue;
                 if (defaultValue.startsWith("\"") && defaultValue.endsWith("\"")) {
                     defaultValue = defaultValue.substring(1, defaultValue.length() - 1);
                 } else if (defaultValue.startsWith("'") && defaultValue.endsWith("'")) {
@@ -166,5 +209,26 @@ public class LuaScriptParser {
             }
         }
         return content.toString();
+    }
+    
+    private String removeCommentedLines(String content) {
+        // Process line by line to handle Lua comments
+        String[] lines = content.split("\n");
+        StringBuilder result = new StringBuilder();
+        
+        for (String line : lines) {
+            // Find the position of -- comment marker
+            int commentPos = line.indexOf("--");
+            if (commentPos >= 0) {
+                // Keep only the part before the comment
+                result.append(line.substring(0, commentPos));
+            } else {
+                // No comment, keep the entire line
+                result.append(line);
+            }
+            result.append("\n");
+        }
+        
+        return result.toString();
     }
 }

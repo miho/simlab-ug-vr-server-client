@@ -76,6 +76,7 @@ message ScriptParameter {
         ArrayValue array_value = 7;
     }
     string description = 8;
+    string display_value = 9;  // Original value as it appears in the script for display
 }
 
 enum ParameterType {

@@ -18,6 +18,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.*;
+import java.util.List;
+import java.util.ArrayList;
 
 public class ClientApplication extends Application {
     private static final Logger logger = LoggerFactory.getLogger(ClientApplication.class);
@@ -541,24 +543,54 @@ public class ClientApplication extends Application {
     private void downloadSelectedResult() {
         String selected = resultsListView.getSelectionModel().getSelectedItem();
         if (selected != null && currentSimulationId != null && client != null) {
+            // Extract just the filename from the full path
+            String filename = new File(selected).getName();
+            
             FileChooser fileChooser = new FileChooser();
-            fileChooser.setInitialFileName(new File(selected).getName());
+            fileChooser.setInitialFileName(filename);
             File saveFile = fileChooser.showSaveDialog(resultsListView.getScene().getWindow());
             
             if (saveFile != null) {
-                client.getSimulationResults(currentSimulationId, Arrays.asList(selected),
+                log("Downloading " + filename + " to " + saveFile.getAbsolutePath());
+                
+                // Use the filename pattern to match the file
+                List<String> patterns = Arrays.asList(filename);
+                
+                // Create a list to collect file data
+                List<FileData> receivedFiles = new ArrayList<>();
+                
+                client.getSimulationResults(currentSimulationId, patterns,
                         fileData -> {
-                            try (FileOutputStream fos = new FileOutputStream(saveFile)) {
-                                fos.write(fileData.getContent().toByteArray());
-                                Platform.runLater(() -> 
-                                        log("Downloaded: " + fileData.getFilename()));
-                            } catch (IOException e) {
-                                logger.error("Error saving file", e);
-                            }
+                            // Collect the file data
+                            receivedFiles.add(fileData);
+                            Platform.runLater(() -> 
+                                    log("Received: " + fileData.getFilename() + " (" + 
+                                        fileData.getContent().size() + " bytes)"));
                         },
-                        () -> Platform.runLater(() -> log("Download complete"))
+                        () -> {
+                            // Write the first matching file when complete
+                            if (!receivedFiles.isEmpty()) {
+                                try {
+                                    FileData fileData = receivedFiles.get(0);
+                                    try (FileOutputStream fos = new FileOutputStream(saveFile)) {
+                                        fos.write(fileData.getContent().toByteArray());
+                                        Platform.runLater(() -> 
+                                                log("Successfully saved: " + saveFile.getAbsolutePath()));
+                                    }
+                                } catch (IOException e) {
+                                    logger.error("Error saving file", e);
+                                    Platform.runLater(() -> 
+                                            showAlert("Download Error", "Failed to save file: " + e.getMessage()));
+                                }
+                            } else {
+                                Platform.runLater(() -> 
+                                        log("No files received for download"));
+                            }
+                        }
                 );
             }
+        } else {
+            showAlert("Download Error", "Please select a file and ensure a simulation has been run");
         }
     }
     

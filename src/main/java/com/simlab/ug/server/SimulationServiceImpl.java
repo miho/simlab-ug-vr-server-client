@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +22,7 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
     private static final Logger logger = LoggerFactory.getLogger(SimulationServiceImpl.class);
     
     private final Map<String, SimulationExecutor> activeSimulations = new ConcurrentHashMap<>();
+    private final Map<String, String> completedSimulationDirs = new ConcurrentHashMap<>();
     private String ugPath = "";
     private String workingDirectory = System.getProperty("user.dir");
     private final LuaScriptParser scriptParser = new LuaScriptParser();
@@ -142,6 +144,14 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                 
                 @Override
                 public void onComplete(SimulationState state, long duration, java.util.List<String> outputFiles) {
+                    // Store the output directory for completed simulations
+                    SimulationExecutor completedExecutor = activeSimulations.get(finalSimulationId);
+                    if (completedExecutor != null && completedExecutor.getOutputDirectory() != null) {
+                        completedSimulationDirs.put(finalSimulationId, completedExecutor.getOutputDirectory());
+                        logger.info("Stored output directory for completed simulation " + finalSimulationId + 
+                                   ": " + completedExecutor.getOutputDirectory());
+                    }
+                    
                     responseObserver.onNext(SimulationUpdate.newBuilder()
                             .setSimulationId(finalSimulationId)
                             .setType(UpdateType.RESULT)
@@ -210,17 +220,51 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
     public void getSimulationResults(GetResultsRequest request, 
                                     StreamObserver<FileData> responseObserver) {
         try {
-            Path outputDir = Paths.get(workingDirectory, "output", request.getSimulationId());
+            String simulationId = request.getSimulationId();
+            logger.info("Getting results for simulation: " + simulationId);
+            
+            // First check if there's an active simulation with custom output directory
+            SimulationExecutor executor = activeSimulations.get(simulationId);
+            Path outputDir = null;
+            
+            if (executor != null && executor.getOutputDirectory() != null) {
+                // Use the executor's output directory
+                File outDir = new File(executor.getOutputDirectory());
+                if (!outDir.isAbsolute()) {
+                    outDir = new File(workingDirectory, executor.getOutputDirectory());
+                }
+                outputDir = outDir.toPath();
+                logger.info("Using active executor output directory: " + outputDir);
+            } else if (completedSimulationDirs.containsKey(simulationId)) {
+                // Check completed simulations
+                String completedDir = completedSimulationDirs.get(simulationId);
+                File outDir = new File(completedDir);
+                if (!outDir.isAbsolute()) {
+                    outDir = new File(workingDirectory, completedDir);
+                }
+                outputDir = outDir.toPath();
+                logger.info("Using completed simulation output directory: " + outputDir);
+            } else {
+                // Fall back to default output directory structure
+                outputDir = Paths.get(workingDirectory, "output", simulationId);
+                logger.info("Using default output directory: " + outputDir);
+            }
+            
             if (!Files.exists(outputDir)) {
+                logger.warn("Output directory does not exist: " + outputDir);
                 responseObserver.onCompleted();
                 return;
             }
             
+            List<String> patterns = request.getFilePatternsList();
+            logger.info("Looking for files matching patterns: " + patterns);
+            
             Files.walk(outputDir)
                     .filter(Files::isRegularFile)
-                    .filter(path -> matchesPatterns(path, request.getFilePatternsList()))
+                    .filter(path -> matchesPatterns(path, patterns))
                     .forEach(path -> {
                         try {
+                            logger.info("Sending file: " + path.getFileName());
                             byte[] content = Files.readAllBytes(path);
                             String mimeType = Files.probeContentType(path);
                             if (mimeType == null) {
@@ -238,6 +282,7 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                     });
             
             responseObserver.onCompleted();
+            logger.info("Completed sending results for simulation: " + simulationId);
         } catch (Exception e) {
             logger.error("Error getting simulation results", e);
             responseObserver.onError(e);

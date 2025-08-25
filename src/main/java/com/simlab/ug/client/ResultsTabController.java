@@ -1,6 +1,8 @@
 package com.simlab.ug.client;
 
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -132,6 +134,9 @@ public class ResultsTabController {
         Button addGroupBtn = new Button("Add Group");
         addGroupBtn.setOnAction(e -> addNewGroup());
         
+        Button editGroupBtn = new Button("Edit Group");
+        editGroupBtn.setOnAction(e -> editSelectedGroup());
+        
         Button removeGroupBtn = new Button("Remove Selected");
         removeGroupBtn.setOnAction(e -> removeSelectedGroup());
         
@@ -145,8 +150,24 @@ public class ResultsTabController {
         Button convertAllBtn = new Button("Convert All");
         convertAllBtn.setOnAction(e -> convertAllGroups());
         
-        controlBox.getChildren().addAll(addGroupBtn, removeGroupBtn, configureBtn, 
-                                       new Separator(), convertBtn, convertAllBtn);
+        Button selectAllBtn = new Button("Select All");
+        selectAllBtn.setStyle("-fx-font-size: 11;");
+        selectAllBtn.setOnAction(e -> {
+            fileGroups.forEach(g -> g.setSelected(true));
+            groupsTable.refresh();
+        });
+        
+        Button deselectAllBtn = new Button("Deselect All");
+        deselectAllBtn.setStyle("-fx-font-size: 11;");
+        deselectAllBtn.setOnAction(e -> {
+            fileGroups.forEach(g -> g.setSelected(false));
+            groupsTable.refresh();
+        });
+        
+        controlBox.getChildren().addAll(
+            selectAllBtn, deselectAllBtn, new Separator(),
+            addGroupBtn, editGroupBtn, removeGroupBtn, configureBtn, 
+            new Separator(), convertBtn, convertAllBtn);
         
         // Table for file groups
         groupsTable = createGroupsTable();
@@ -161,24 +182,33 @@ public class ResultsTabController {
         table.setItems(fileGroups);
         
         // Checkbox column for selection
-        TableColumn<VtuFileGroup, CheckBox> selectCol = new TableColumn<>("");
+        TableColumn<VtuFileGroup, Boolean> selectCol = new TableColumn<>("");
         selectCol.setPrefWidth(30);
-        selectCol.setCellFactory(col -> new TableCell<>() {
+        selectCol.setCellValueFactory(cellData -> {
+            VtuFileGroup group = cellData.getValue();
+            javafx.beans.property.BooleanProperty property = 
+                new javafx.beans.property.SimpleBooleanProperty(group.isSelected());
+            
+            property.addListener((obs, oldVal, newVal) -> {
+                group.setSelected(newVal);
+            });
+            
+            return property;
+        });
+        selectCol.setCellFactory(col -> new TableCell<VtuFileGroup, Boolean>() {
             private final CheckBox checkBox = new CheckBox();
-            {
-                checkBox.selectedProperty().addListener((obs, oldVal, newVal) -> {
-                    VtuFileGroup group = getTableRow().getItem();
-                    if (group != null) {
-                        // Store selection state
-                    }
-                });
-            }
+            
             @Override
-            protected void updateItem(CheckBox item, boolean empty) {
+            protected void updateItem(Boolean item, boolean empty) {
                 super.updateItem(item, empty);
-                if (empty) {
+                if (empty || getTableRow() == null || getTableRow().getItem() == null) {
                     setGraphic(null);
                 } else {
+                    VtuFileGroup group = getTableRow().getItem();
+                    checkBox.setSelected(group.isSelected());
+                    checkBox.selectedProperty().addListener((obs, oldVal, newVal) -> {
+                        group.setSelected(newVal);
+                    });
                     setGraphic(checkBox);
                 }
             }
@@ -447,6 +477,21 @@ public class ResultsTabController {
         }
     }
     
+    private void editSelectedGroup() {
+        VtuFileGroup selected = groupsTable.getSelectionModel().getSelectedItem();
+        if (selected != null) {
+            EditGroupDialog dialog = new EditGroupDialog(selected);
+            Optional<VtuFileGroup> result = dialog.showAndWait();
+            
+            result.ifPresent(group -> {
+                // Rescan files with new pattern
+                rescanGroup(group);
+                groupsTable.refresh();
+                log("Updated group: " + group.getGroupName());
+            });
+        }
+    }
+    
     private void removeSelectedGroup() {
         VtuFileGroup selected = groupsTable.getSelectionModel().getSelectedItem();
         if (selected != null) {
@@ -473,13 +518,14 @@ public class ResultsTabController {
     }
     
     private void convertSelectedGroups() {
-        // Convert groups that have checkbox selected
+        // Convert only groups that have checkbox selected
         List<VtuFileGroup> toConvert = fileGroups.stream()
+            .filter(VtuFileGroup::isSelected)
             .filter(g -> g.getFileCount() > 0)
             .collect(Collectors.toList());
         
         if (toConvert.isEmpty()) {
-            showAlert("Info", "No groups selected for conversion");
+            showAlert("Info", "No groups selected for conversion. Please check the boxes for groups you want to convert.");
             return;
         }
         
@@ -496,6 +542,10 @@ public class ResultsTabController {
             return;
         }
         
+        // Select all groups for conversion
+        toConvert.forEach(g -> g.setSelected(true));
+        groupsTable.refresh();
+        
         performConversion(toConvert);
     }
     
@@ -506,67 +556,125 @@ public class ResultsTabController {
         }
         
         CompletableFuture.runAsync(() -> {
-            int totalGroups = groups.size();
-            int currentGroup = 0;
+            // Count total files to process
+            int totalFiles = groups.stream()
+                .mapToInt(VtuFileGroup::getFileCount)
+                .sum();
+            int processedFiles = 0;
             
             for (VtuFileGroup group : groups) {
-                currentGroup++;
-                final int progress = currentGroup;
-                
                 Platform.runLater(() -> {
-                    statusLabel.setText("Converting " + group.getGroupName() + 
-                                      " (" + progress + "/" + totalGroups + ")");
-                    conversionProgress.setProgress((double) progress / totalGroups);
+                    log("Processing group: " + group.getGroupName() + 
+                        " (" + group.getFileCount() + " files)");
                 });
                 
-                // Build and execute conversion command
-                List<String> command = group.buildConversionCommand(
-                    vtu2gltfExecutable, 
-                    group.getFiles()
-                );
-                
-                log("Converting " + group.getGroupName() + " with " + 
-                    group.getFileCount() + " files");
-                log("Command: " + String.join(" ", command));
-                
-                try {
-                    ProcessBuilder pb = new ProcessBuilder(command);
-                    if (currentOutputDirectory != null) {
-                        pb.directory(currentOutputDirectory.toFile());
-                    }
+                // Process each file in the group individually
+                for (VtuFileGroup.VtuFile vtuFile : group.getFiles()) {
+                    processedFiles++;
+                    final int currentFile = processedFiles;
                     
-                    Process process = pb.start();
+                    Platform.runLater(() -> {
+                        statusLabel.setText(String.format("Converting %s - %s (%d/%d)", 
+                            group.getGroupName(), 
+                            vtuFile.getFilename(),
+                            currentFile, 
+                            totalFiles));
+                        conversionProgress.setProgress((double) currentFile / totalFiles);
+                    });
                     
-                    // Read output
-                    BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(process.getInputStream()));
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        final String output = line;
-                        Platform.runLater(() -> log(output));
-                    }
+                    // Generate output filename for this specific file
+                    String outputFilename = generateOutputFilename(group, vtuFile);
                     
-                    int exitCode = process.waitFor();
-                    if (exitCode == 0) {
+                    // Build command for this single file
+                    List<String> command = group.buildConversionCommand(
+                        vtu2gltfExecutable, 
+                        vtuFile,
+                        outputFilename
+                    );
+                    
+                    log("Converting: " + vtuFile.getFilename() + " -> " + outputFilename);
+                    
+                    try {
+                        ProcessBuilder pb = new ProcessBuilder(command);
+                        if (currentOutputDirectory != null) {
+                            pb.directory(currentOutputDirectory.toFile());
+                        }
+                        
+                        Process process = pb.start();
+                        
+                        // Read output (capture both stdout and stderr)
+                        BufferedReader stdoutReader = new BufferedReader(
+                            new InputStreamReader(process.getInputStream()));
+                        BufferedReader stderrReader = new BufferedReader(
+                            new InputStreamReader(process.getErrorStream()));
+                        
+                        // Read stdout
+                        String line;
+                        while ((line = stdoutReader.readLine()) != null) {
+                            final String output = line;
+                            Platform.runLater(() -> log("  " + output));
+                        }
+                        
+                        // Read stderr
+                        while ((line = stderrReader.readLine()) != null) {
+                            final String error = line;
+                            Platform.runLater(() -> log("  ERROR: " + error));
+                        }
+                        
+                        int exitCode = process.waitFor();
+                        if (exitCode == 0) {
+                            Platform.runLater(() -> 
+                                log("  ✓ Successfully converted: " + outputFilename));
+                        } else {
+                            Platform.runLater(() -> 
+                                log("  ✗ Failed to convert " + vtuFile.getFilename() + 
+                                    " (exit code: " + exitCode + ")"));
+                        }
+                        
+                    } catch (Exception e) {
                         Platform.runLater(() -> 
-                            log("Successfully converted " + group.getGroupName()));
-                    } else {
-                        Platform.runLater(() -> 
-                            log("Error converting " + group.getGroupName() + 
-                                " (exit code: " + exitCode + ")"));
+                            log("  ✗ Error converting " + vtuFile.getFilename() + ": " + e.getMessage()));
                     }
-                    
-                } catch (Exception e) {
-                    Platform.runLater(() -> 
-                        log("Error converting " + group.getGroupName() + ": " + e.getMessage()));
                 }
             }
             
             Platform.runLater(() -> {
                 statusLabel.setText("Conversion complete");
                 conversionProgress.setProgress(1.0);
+                log("All conversions finished. Total files processed: " + totalFiles);
             });
         });
+    }
+    
+    private String generateOutputFilename(VtuFileGroup group, VtuFileGroup.VtuFile vtuFile) {
+        String baseExport = group.getConversionOption("export");
+        if (baseExport == null || baseExport.isEmpty()) {
+            baseExport = "output.gltf";
+        }
+        
+        // Extract base name and extension
+        String extension = ".gltf";
+        if (baseExport.endsWith(".glb")) {
+            extension = ".glb";
+        }
+        
+        String filename = vtuFile.getFilename();
+        String nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
+        
+        // Create unique output name: group_filename.gltf
+        // If it's a time series, include time step in the name
+        if (vtuFile.hasTimeStep()) {
+            return String.format("%s_%s_t%05d%s", 
+                group.getGroupName(), 
+                nameWithoutExt.replaceAll("_?t\\d+$", ""), // Remove time step from original name
+                vtuFile.getTimeStep(),
+                extension);
+        } else {
+            return String.format("%s_%s%s", 
+                group.getGroupName(), 
+                nameWithoutExt,
+                extension);
+        }
     }
     
     private void startWatching() {

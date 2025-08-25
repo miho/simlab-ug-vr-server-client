@@ -15,6 +15,7 @@ public class VtuFileGroup {
     private List<VtuFile> files = new ArrayList<>();
     private Map<String, String> conversionOptions = new HashMap<>();
     private boolean isTimeSeries = false;
+    private boolean selected = false;
     
     // Pattern to detect time step in filename (e.g., t00001.vtu or _t00001.vtu)
     private static final Pattern TIME_STEP_PATTERN = Pattern.compile(".*[_\\.]?t(\\d+)\\.vtu$", Pattern.CASE_INSENSITIVE);
@@ -107,20 +108,32 @@ public class VtuFileGroup {
                 .collect(java.util.stream.Collectors.toSet());
     }
     
-    // Build command line arguments for vtu2gltf
-    public List<String> buildConversionCommand(String vtu2gltfPath, List<VtuFile> selectedFiles) {
+    // Build command line arguments for vtu2gltf for a single file
+    public List<String> buildConversionCommand(String vtu2gltfPath, VtuFile file, String outputPath) {
         List<String> command = new ArrayList<>();
         command.add(vtu2gltfPath);
         
-        // Add input files
-        for (VtuFile file : selectedFiles) {
-            command.add(file.getFullPath());
+        // Add input file
+        command.add(file.getFullPath());
+        
+        // Set output path for this specific file
+        if (outputPath != null && !outputPath.isEmpty()) {
+            command.add("--export=" + outputPath);
+        } else if (conversionOptions.containsKey("export")) {
+            // Use the base export name and modify it for this file
+            String baseExport = conversionOptions.get("export");
+            String modifiedExport = generateOutputFilename(baseExport, file);
+            command.add("--export=" + modifiedExport);
         }
         
-        // Add conversion options
+        // Add conversion options (except export which we handle specially)
         for (Map.Entry<String, String> option : conversionOptions.entrySet()) {
             String key = option.getKey();
             String value = option.getValue();
+            
+            if (key.equals("export")) {
+                continue; // Already handled above
+            }
             
             if (value != null && !value.isEmpty()) {
                 if (key.equals("no-preview") || key.equals("contour")) {
@@ -136,6 +149,21 @@ public class VtuFileGroup {
         }
         
         return command;
+    }
+    
+    // Generate unique output filename for each VTU file
+    private String generateOutputFilename(String baseExport, VtuFile file) {
+        String filename = file.getFilename();
+        String nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
+        
+        // Determine extension from base export
+        String extension = ".gltf";
+        if (baseExport.endsWith(".glb")) {
+            extension = ".glb";
+        }
+        
+        // Create output filename: groupName_originalName.gltf
+        return groupName + "_" + nameWithoutExt + extension;
     }
     
     // Getters and setters
@@ -165,4 +193,7 @@ public class VtuFileGroup {
         files.clear();
         isTimeSeries = false;
     }
+    
+    public boolean isSelected() { return selected; }
+    public void setSelected(boolean selected) { this.selected = selected; }
 }

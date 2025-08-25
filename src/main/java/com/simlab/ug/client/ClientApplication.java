@@ -252,6 +252,24 @@ public class ClientApplication extends Application {
     }
     
     private void connectToServer() {
+        // Check if we're currently connected (disconnect functionality)
+        if (client != null && client.isConnected()) {
+            // Disconnect
+            client.shutdown();
+            client = null;
+            Platform.runLater(() -> {
+                connectionStatusLabel.setText("Status: Disconnected");
+                connectionStatusLabel.setTextFill(Color.RED);
+                connectButton.setText("Connect");
+                connectButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
+                serverHostField.setDisable(false);
+                serverPortField.setDisable(false);
+                log("Disconnected from server");
+            });
+            return;
+        }
+        
+        // Connect to server
         try {
             String host = serverHostField.getText();
             int port = Integer.parseInt(serverPortField.getText());
@@ -268,6 +286,9 @@ public class ClientApplication extends Application {
                     connectionStatusLabel.setText("Status: Connected");
                     connectionStatusLabel.setTextFill(Color.GREEN);
                     connectButton.setText("Disconnect");
+                    connectButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
+                    serverHostField.setDisable(true);
+                    serverPortField.setDisable(true);
                     ugExecutableField.setText(status.getUgPath());
                     log("Connected to server at " + host + ":" + port);
                 });
@@ -281,6 +302,8 @@ public class ClientApplication extends Application {
             Platform.runLater(() -> {
                 connectionStatusLabel.setText("Status: Disconnected");
                 connectionStatusLabel.setTextFill(Color.RED);
+                connectButton.setText("Connect");
+                connectButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
             });
         }
     }

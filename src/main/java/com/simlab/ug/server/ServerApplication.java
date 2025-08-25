@@ -1,5 +1,6 @@
 package com.simlab.ug.server;
 
+import com.simlab.ug.common.SimulationExecutor;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -16,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class ServerApplication extends Application {
@@ -257,10 +259,21 @@ public class ServerApplication extends Application {
                 try {
                     Thread.sleep(2000);
                     // Update active simulations list
-                    // This would query the simulationService for active simulations
-                    Platform.runLater(() -> {
-                        // Update UI with active simulations
-                    });
+                    if (simulationService != null) {
+                        Platform.runLater(() -> {
+                            activeSimulationsList.getItems().clear();
+                            Map<String, SimulationExecutor> simulations = simulationService.getActiveSimulations();
+                            for (Map.Entry<String, SimulationExecutor> entry : simulations.entrySet()) {
+                                String simId = entry.getKey();
+                                SimulationExecutor exec = entry.getValue();
+                                String display = String.format("%s - %s (%.1f%%)", 
+                                    simId.substring(0, 8), 
+                                    exec.getState().toString(),
+                                    exec.getProgress() * 100);
+                                activeSimulationsList.getItems().add(display);
+                            }
+                        });
+                    }
                 } catch (InterruptedException e) {
                     break;
                 }

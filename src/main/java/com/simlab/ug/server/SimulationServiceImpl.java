@@ -252,6 +252,10 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         return ugPath;
     }
     
+    public Map<String, SimulationExecutor> getActiveSimulations() {
+        return activeSimulations;
+    }
+    
     private boolean matchesPatterns(Path path, java.util.List<String> patterns) {
         if (patterns.isEmpty()) {
             return true;

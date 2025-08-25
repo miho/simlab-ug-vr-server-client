@@ -75,6 +75,14 @@ task runClient(type: JavaExec) {
                '--add-modules', 'javafx.controls,javafx.fxml']
 }
 
+// Task to run the client
+task runClient2(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.simlab.ug.client.ClientApplication'
+    jvmArgs = ['--module-path', classpath.asPath,
+               '--add-modules', 'javafx.controls,javafx.fxml']
+}
+
 sourceSets {
     main {
         java {

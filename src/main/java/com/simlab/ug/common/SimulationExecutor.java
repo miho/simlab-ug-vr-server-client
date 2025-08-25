@@ -81,7 +81,7 @@ public class SimulationExecutor {
                 // Change working directory to output directory if specified
                 // This ensures scripts that write to CWD will write to the correct location
                 if (outputDirectory != null && !outputDirectory.isEmpty()) {
-                    File outputDirFile = new File(outputDirectory);
+                    /*File*/ outputDirFile = new File(outputDirectory);
                     if (!outputDirFile.isAbsolute()) {
                         outputDirFile = new File(workingDirectory, outputDirectory);
                     }

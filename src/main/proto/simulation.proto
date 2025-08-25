@@ -22,6 +22,18 @@ service SimulationService {
     rpc GetSimulationResults(GetResultsRequest) returns (stream FileData);
 }
 
+// Service for publishing GLTF results grouped with time-series semantics and live updates
+service ResultsService {
+    // List detected GLTF groups under the server's working/output directories
+    rpc ListGltfGroups(ListGltfGroupsRequest) returns (ListGltfGroupsResponse);
+
+    // Stream GLTF files for a specific group (optionally for a single time step)
+    rpc GetGroupGltfFiles(GetGroupGltfFilesRequest) returns (stream FileData);
+
+    // Subscribe to GLTF file creation/update events with grouping metadata
+    rpc SubscribeGltfFileEvents(SubscribeGltfFileEventsRequest) returns (stream GltfFileEvent);
+}
+
 message Empty {}
 
 message ServerStatus {
@@ -173,4 +185,62 @@ message FileData {
     string filename = 1;
     bytes content = 2;
     string mime_type = 3;
+}
+
+// ===== GLTF grouping and events =====
+
+message ListGltfGroupsRequest {
+    // Optional: restrict to a specific directory; if empty, server default locations are used
+    string root_directory = 1;
+}
+
+message ListGltfGroupsResponse {
+    repeated GltfGroup groups = 1;
+}
+
+message GltfGroup {
+    string group_id = 1;            // stable id derived from directory + pattern
+    string group_name = 2;          // human-friendly name
+    string directory = 3;           // directory where files are located
+    string pattern = 4;             // filename pattern (e.g., mycase_t*.gltf)
+    bool is_time_series = 5;        // true if files have time-step suffixes
+    repeated int32 time_steps = 6;  // available time steps (sorted ascending)
+    int32 file_count = 7;
+    repeated GroupFile files = 8;   // optional file listing (may be truncated by server)
+}
+
+message GroupFile {
+    string filename = 1;
+    string full_path = 2;
+    int64 file_size = 3;
+    int64 last_modified_ms = 4;
+    int32 time_step = 5;            // 0 if not applicable
+}
+
+message GetGroupGltfFilesRequest {
+    string group_id = 1;
+    oneof selection {
+        int32 time_step = 2;        // serve files for this single time step
+        bool all = 3;               // serve all files in the group
+    }
+}
+
+enum GltfFileEventType {
+    FILE_CREATED = 0;
+    FILE_MODIFIED = 1;
+    GROUP_CREATED = 2;
+    GROUP_UPDATED = 3;
+}
+
+message GltfFileEvent {
+    GltfFileEventType type = 1;
+    string group_id = 2;
+    string group_name = 3;
+    GroupFile file = 4;             // present for FILE_* events
+    GltfGroup group = 5;            // present for GROUP_* events
+}
+
+message SubscribeGltfFileEventsRequest {
+    // Optional: restrict watching to this directory; if empty, server default locations are used
+    string root_directory = 1;
 }

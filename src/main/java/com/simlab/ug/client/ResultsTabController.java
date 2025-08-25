@@ -312,8 +312,8 @@ public class ResultsTabController {
     private void browseForVtu2gltf() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Select vtu2gltf Executable");
-        chooser.getExtensionFilters().add(
-            new FileChooser.ExtensionFilter("Executable", "*.exe", "*")
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Executable", "*", "*")
         );
         
         File file = chooser.showOpenDialog(root.getScene().getWindow());

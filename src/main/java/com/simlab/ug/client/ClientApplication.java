@@ -45,6 +45,7 @@ public class ClientApplication extends Application {
     private Label progressLabel;
     private TextArea logArea;
     private ListView<String> resultsListView;
+    private ResultsTabController resultsController;
     
     private String currentSimulationId;
     
@@ -232,25 +233,19 @@ public class ClientApplication extends Application {
         Tab tab = new Tab("Results");
         tab.setClosable(false);
         
-        VBox content = new VBox(10);
-        content.setPadding(new Insets(10));
+        // Use the new enhanced results tab controller
+        ResultsTabController resultsController = new ResultsTabController();
+        VBox resultsContent = resultsController.createResultsTab();
         
-        Label resultsLabel = new Label("Simulation Output Files:");
+        // Set initial output directory if available
+        if (outputDirField != null && !outputDirField.getText().isEmpty()) {
+            resultsController.setOutputDirectory(outputDirField.getText());
+        }
         
-        resultsListView = new ListView<>();
-        resultsListView.setPrefHeight(200);
+        // Store reference for later use
+        this.resultsController = resultsController;
         
-        HBox buttonBox = new HBox(10);
-        Button refreshButton = new Button("Refresh");
-        refreshButton.setOnAction(e -> refreshResults());
-        
-        Button downloadButton = new Button("Download Selected");
-        downloadButton.setOnAction(e -> downloadSelectedResult());
-        
-        buttonBox.getChildren().addAll(refreshButton, downloadButton);
-        
-        content.getChildren().addAll(resultsLabel, resultsListView, buttonBox);
-        tab.setContent(content);
+        tab.setContent(resultsContent);
         
         return tab;
     }
@@ -507,7 +502,16 @@ public class ClientApplication extends Application {
                             progressLabel.setText("Simulation " + result.getFinalState());
                             log("Simulation completed in " + result.getDurationMs() + " ms");
                             log("Output files: " + result.getOutputFilesList());
-                            resultsListView.getItems().addAll(result.getOutputFilesList());
+                            
+                            // Update results controller with output directory
+                            if (resultsController != null && !outputDirField.getText().isEmpty()) {
+                                resultsController.setOutputDirectory(outputDirField.getText());
+                            }
+                            
+                            // Keep old results list for backward compatibility
+                            if (resultsListView != null) {
+                                resultsListView.getItems().addAll(result.getOutputFilesList());
+                            }
                         });
                     }
                     

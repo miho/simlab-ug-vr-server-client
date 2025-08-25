@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.simlab.ug.grpc";
+option java_outer_classname = "SimulationProto";
+
+package simulation;
+
+service SimulationService {
+    // Server control
+    rpc GetServerStatus(Empty) returns (ServerStatus);
+    rpc SetWorkingDirectory(SetWorkingDirectoryRequest) returns (StatusResponse);
+    
+    // Script analysis
+    rpc AnalyzeScript(AnalyzeScriptRequest) returns (ScriptAnalysis);
+    
+    // Simulation execution
+    rpc RunSimulation(RunSimulationRequest) returns (stream SimulationUpdate);
+    rpc StopSimulation(StopSimulationRequest) returns (StatusResponse);
+    
+    // File operations
+    rpc GetSimulationResults(GetResultsRequest) returns (stream FileData);
+}
+
+message Empty {}
+
+message ServerStatus {
+    bool is_running = 1;
+    string ug_path = 2;
+    string working_directory = 3;
+    repeated ActiveSimulation active_simulations = 4;
+}
+
+message ActiveSimulation {
+    string simulation_id = 1;
+    string script_path = 2;
+    SimulationState state = 3;
+    double progress = 4;
+}
+
+enum SimulationState {
+    PENDING = 0;
+    RUNNING = 1;
+    COMPLETED = 2;
+    FAILED = 3;
+    CANCELLED = 4;
+}
+
+message SetWorkingDirectoryRequest {
+    string directory = 1;
+}
+
+message StatusResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message AnalyzeScriptRequest {
+    string script_path = 1;
+}
+
+message ScriptAnalysis {
+    bool success = 1;
+    string error_message = 2;
+    repeated ScriptParameter parameters = 3;
+}
+
+message ScriptParameter {
+    string name = 1;
+    ParameterType type = 2;
+    oneof default_value {
+        string string_value = 3;
+        int32 int_value = 4;
+        double float_value = 5;
+        bool bool_value = 6;
+        ArrayValue array_value = 7;
+    }
+    string description = 8;
+}
+
+enum ParameterType {
+    STRING = 0;
+    INTEGER = 1;
+    FLOAT = 2;
+    BOOLEAN = 3;
+    ARRAY = 4;
+}
+
+message ArrayValue {
+    repeated string values = 1;
+}
+
+message RunSimulationRequest {
+    string simulation_id = 1;
+    string script_path = 2;
+    string ug_executable = 3;
+    repeated ParameterValue parameters = 4;
+    string output_directory = 5;
+}
+
+message StopSimulationRequest {
+    string simulation_id = 1;
+}
+
+message ParameterValue {
+    string name = 1;
+    oneof value {
+        string string_value = 2;
+        int32 int_value = 3;
+        double float_value = 4;
+        bool bool_value = 5;
+        ArrayValue array_value = 6;
+    }
+}
+
+message SimulationUpdate {
+    string simulation_id = 1;
+    UpdateType type = 2;
+    oneof update {
+        ProgressUpdate progress = 3;
+        LogMessage log = 4;
+        SimulationResult result = 5;
+        ErrorMessage error = 6;
+    }
+}
+
+enum UpdateType {
+    PROGRESS = 0;
+    LOG = 1;
+    RESULT = 2;
+    UPDATE_ERROR = 3;
+}
+
+message ProgressUpdate {
+    double percentage = 1;
+    string message = 2;
+    int32 current_step = 3;
+    int32 total_steps = 4;
+}
+
+message LogMessage {
+    LogLevel level = 1;
+    string message = 2;
+    int64 timestamp = 3;
+}
+
+enum LogLevel {
+    DEBUG = 0;
+    INFO = 1;
+    WARNING = 2;
+    LOG_ERROR = 3;
+}
+
+message SimulationResult {
+    SimulationState final_state = 1;
+    int64 duration_ms = 2;
+    repeated string output_files = 3;
+    string summary = 4;
+}
+
+message ErrorMessage {
+    string error = 1;
+    string stack_trace = 2;
+}
+
+message GetResultsRequest {
+    string simulation_id = 1;
+    repeated string file_patterns = 2;
+}
+
+message FileData {
+    string filename = 1;
+    bytes content = 2;
+    string mime_type = 3;
+}

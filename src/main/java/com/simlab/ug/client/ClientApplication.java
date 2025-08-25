@@ -1,0 +1,560 @@
+package com.simlab.ug.client;
+
+import com.simlab.ug.grpc.*;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.stage.FileChooser;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.Stage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.*;
+
+public class ClientApplication extends Application {
+    private static final Logger logger = LoggerFactory.getLogger(ClientApplication.class);
+    
+    private SimulationClient client;
+    private TextField serverHostField;
+    private TextField serverPortField;
+    private Button connectButton;
+    private Label connectionStatusLabel;
+    
+    private TextField scriptPathField;
+    private TextField ugExecutableField;
+    private TextField outputDirField;
+    private VBox parametersContainer;
+    private Map<String, Control> parameterControls = new HashMap<>();
+    
+    private Button analyzeButton;
+    private Button runButton;
+    private Button stopButton;
+    private ProgressBar progressBar;
+    private Label progressLabel;
+    private TextArea logArea;
+    private ListView<String> resultsListView;
+    
+    private String currentSimulationId;
+    
+    @Override
+    public void start(Stage primaryStage) {
+        primaryStage.setTitle("UG4 Simulation Client");
+        
+        TabPane tabPane = new TabPane();
+        
+        Tab connectionTab = createConnectionTab();
+        Tab simulationTab = createSimulationTab();
+        Tab resultsTab = createResultsTab();
+        
+        tabPane.getTabs().addAll(connectionTab, simulationTab, resultsTab);
+        
+        Scene scene = new Scene(tabPane, 900, 700);
+        primaryStage.setScene(scene);
+        primaryStage.show();
+        
+        // Shutdown hook
+        primaryStage.setOnCloseRequest(event -> {
+            if (client != null) {
+                client.shutdown();
+            }
+            Platform.exit();
+        });
+    }
+    
+    private Tab createConnectionTab() {
+        Tab tab = new Tab("Connection");
+        tab.setClosable(false);
+        
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+        
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        
+        Label hostLabel = new Label("Server Host:");
+        serverHostField = new TextField("localhost");
+        
+        Label portLabel = new Label("Server Port:");
+        serverPortField = new TextField("50051");
+        
+        connectButton = new Button("Connect");
+        connectButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
+        connectButton.setOnAction(e -> connectToServer());
+        
+        connectionStatusLabel = new Label("Status: Disconnected");
+        connectionStatusLabel.setTextFill(Color.RED);
+        
+        grid.add(hostLabel, 0, 0);
+        grid.add(serverHostField, 1, 0);
+        grid.add(portLabel, 0, 1);
+        grid.add(serverPortField, 1, 1);
+        grid.add(connectButton, 0, 2);
+        grid.add(connectionStatusLabel, 1, 2);
+        
+        // Server info section
+        TitledPane serverInfoPane = new TitledPane("Server Information", new Label("Not connected"));
+        
+        content.getChildren().addAll(grid, serverInfoPane);
+        tab.setContent(content);
+        
+        return tab;
+    }
+    
+    private Tab createSimulationTab() {
+        Tab tab = new Tab("Simulation");
+        tab.setClosable(false);
+        
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+        
+        // Script selection
+        GridPane scriptGrid = new GridPane();
+        scriptGrid.setHgap(10);
+        scriptGrid.setVgap(10);
+        
+        Label scriptLabel = new Label("Lua Script:");
+        scriptPathField = new TextField();
+        scriptPathField.setPrefWidth(400);
+        Button browseScriptButton = new Button("Browse...");
+        browseScriptButton.setOnAction(e -> browseForScript());
+        
+        Label ugLabel = new Label("UG4 Executable:");
+        ugExecutableField = new TextField();
+        ugExecutableField.setPrefWidth(400);
+        Button browseUgButton = new Button("Browse...");
+        browseUgButton.setOnAction(e -> browseForUgExecutable());
+        
+        Label outputLabel = new Label("Output Directory:");
+        outputDirField = new TextField();
+        outputDirField.setPrefWidth(400);
+        Button browseOutputButton = new Button("Browse...");
+        browseOutputButton.setOnAction(e -> browseForOutputDirectory());
+        
+        analyzeButton = new Button("Analyze Script");
+        analyzeButton.setOnAction(e -> analyzeScript());
+        
+        scriptGrid.add(scriptLabel, 0, 0);
+        scriptGrid.add(scriptPathField, 1, 0);
+        scriptGrid.add(browseScriptButton, 2, 0);
+        
+        scriptGrid.add(ugLabel, 0, 1);
+        scriptGrid.add(ugExecutableField, 1, 1);
+        scriptGrid.add(browseUgButton, 2, 1);
+        
+        scriptGrid.add(outputLabel, 0, 2);
+        scriptGrid.add(outputDirField, 1, 2);
+        scriptGrid.add(browseOutputButton, 2, 2);
+        
+        scriptGrid.add(analyzeButton, 1, 3);
+        
+        // Parameters section
+        TitledPane parametersPane = new TitledPane("Script Parameters", createParametersSection());
+        
+        // Control buttons
+        HBox controlBox = new HBox(10);
+        runButton = new Button("Run Simulation");
+        runButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
+        runButton.setDisable(true);
+        runButton.setOnAction(e -> runSimulation());
+        
+        stopButton = new Button("Stop Simulation");
+        stopButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
+        stopButton.setDisable(true);
+        stopButton.setOnAction(e -> stopSimulation());
+        
+        controlBox.getChildren().addAll(runButton, stopButton);
+        
+        // Progress section
+        VBox progressBox = new VBox(5);
+        progressLabel = new Label("Ready");
+        progressBar = new ProgressBar(0);
+        progressBar.setPrefWidth(400);
+        progressBox.getChildren().addAll(progressLabel, progressBar);
+        
+        // Log section
+        TitledPane logPane = new TitledPane("Simulation Log", createLogSection());
+        
+        content.getChildren().addAll(
+                scriptGrid,
+                parametersPane,
+                controlBox,
+                progressBox,
+                logPane
+        );
+        
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        tab.setContent(scrollPane);
+        
+        return tab;
+    }
+    
+    private VBox createParametersSection() {
+        parametersContainer = new VBox(10);
+        parametersContainer.setPadding(new Insets(10));
+        
+        Label infoLabel = new Label("Analyze a script to see available parameters");
+        infoLabel.setStyle("-fx-font-style: italic;");
+        parametersContainer.getChildren().add(infoLabel);
+        
+        return parametersContainer;
+    }
+    
+    private VBox createLogSection() {
+        VBox box = new VBox(5);
+        
+        logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setPrefRowCount(10);
+        logArea.setWrapText(true);
+        
+        Button clearButton = new Button("Clear Log");
+        clearButton.setOnAction(e -> logArea.clear());
+        
+        box.getChildren().addAll(logArea, clearButton);
+        return box;
+    }
+    
+    private Tab createResultsTab() {
+        Tab tab = new Tab("Results");
+        tab.setClosable(false);
+        
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+        
+        Label resultsLabel = new Label("Simulation Output Files:");
+        
+        resultsListView = new ListView<>();
+        resultsListView.setPrefHeight(200);
+        
+        HBox buttonBox = new HBox(10);
+        Button refreshButton = new Button("Refresh");
+        refreshButton.setOnAction(e -> refreshResults());
+        
+        Button downloadButton = new Button("Download Selected");
+        downloadButton.setOnAction(e -> downloadSelectedResult());
+        
+        buttonBox.getChildren().addAll(refreshButton, downloadButton);
+        
+        content.getChildren().addAll(resultsLabel, resultsListView, buttonBox);
+        tab.setContent(content);
+        
+        return tab;
+    }
+    
+    private void connectToServer() {
+        try {
+            String host = serverHostField.getText();
+            int port = Integer.parseInt(serverPortField.getText());
+            
+            if (client != null) {
+                client.shutdown();
+            }
+            
+            client = new SimulationClient(host, port);
+            
+            if (client.isConnected()) {
+                ServerStatus status = client.getServerStatus();
+                Platform.runLater(() -> {
+                    connectionStatusLabel.setText("Status: Connected");
+                    connectionStatusLabel.setTextFill(Color.GREEN);
+                    connectButton.setText("Disconnect");
+                    ugExecutableField.setText(status.getUgPath());
+                    log("Connected to server at " + host + ":" + port);
+                });
+            } else {
+                throw new RuntimeException("Failed to connect");
+            }
+            
+        } catch (Exception e) {
+            logger.error("Failed to connect to server", e);
+            showAlert("Connection Error", "Failed to connect to server: " + e.getMessage());
+            Platform.runLater(() -> {
+                connectionStatusLabel.setText("Status: Disconnected");
+                connectionStatusLabel.setTextFill(Color.RED);
+            });
+        }
+    }
+    
+    private void browseForScript() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Lua Script");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Lua Scripts", "*.lua")
+        );
+        
+        File file = fileChooser.showOpenDialog(scriptPathField.getScene().getWindow());
+        if (file != null) {
+            scriptPathField.setText(file.getAbsolutePath());
+        }
+    }
+    
+    private void browseForUgExecutable() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select UG4 Executable");
+        
+        File file = fileChooser.showOpenDialog(ugExecutableField.getScene().getWindow());
+        if (file != null) {
+            ugExecutableField.setText(file.getAbsolutePath());
+        }
+    }
+    
+    private void browseForOutputDirectory() {
+        DirectoryChooser dirChooser = new DirectoryChooser();
+        dirChooser.setTitle("Select Output Directory");
+        
+        File dir = dirChooser.showDialog(outputDirField.getScene().getWindow());
+        if (dir != null) {
+            outputDirField.setText(dir.getAbsolutePath());
+        }
+    }
+    
+    private void analyzeScript() {
+        if (client == null || !client.isConnected()) {
+            showAlert("Error", "Not connected to server");
+            return;
+        }
+        
+        String scriptPath = scriptPathField.getText();
+        if (scriptPath.isEmpty()) {
+            showAlert("Error", "Please select a script file");
+            return;
+        }
+        
+        ScriptAnalysis analysis = client.analyzeScript(scriptPath);
+        
+        if (analysis.getSuccess()) {
+            Platform.runLater(() -> {
+                parametersContainer.getChildren().clear();
+                parameterControls.clear();
+                
+                for (ScriptParameter param : analysis.getParametersList()) {
+                    HBox paramBox = new HBox(10);
+                    Label label = new Label(param.getName() + ":");
+                    label.setPrefWidth(150);
+                    
+                    Control control = createParameterControl(param);
+                    parameterControls.put(param.getName(), control);
+                    
+                    Label descLabel = new Label(param.getDescription());
+                    descLabel.setStyle("-fx-font-size: 10; -fx-text-fill: gray;");
+                    
+                    paramBox.getChildren().addAll(label, control, descLabel);
+                    parametersContainer.getChildren().add(paramBox);
+                }
+                
+                if (analysis.getParametersList().isEmpty()) {
+                    Label noParamsLabel = new Label("No parameters found in script");
+                    parametersContainer.getChildren().add(noParamsLabel);
+                }
+                
+                runButton.setDisable(false);
+                log("Script analysis complete. Found " + analysis.getParametersCount() + " parameters.");
+            });
+        } else {
+            showAlert("Analysis Error", analysis.getErrorMessage());
+        }
+    }
+    
+    private Control createParameterControl(ScriptParameter param) {
+        switch (param.getType()) {
+            case STRING:
+                TextField textField = new TextField(param.getStringValue());
+                textField.setPrefWidth(200);
+                return textField;
+                
+            case INTEGER:
+                Spinner<Integer> intSpinner = new Spinner<>(-999999, 999999, param.getIntValue());
+                intSpinner.setEditable(true);
+                intSpinner.setPrefWidth(100);
+                return intSpinner;
+                
+            case FLOAT:
+                Spinner<Double> doubleSpinner = new Spinner<>(-999999.0, 999999.0, param.getFloatValue(), 0.1);
+                doubleSpinner.setEditable(true);
+                doubleSpinner.setPrefWidth(100);
+                return doubleSpinner;
+                
+            case BOOLEAN:
+                CheckBox checkBox = new CheckBox();
+                checkBox.setSelected(param.getBoolValue());
+                return checkBox;
+                
+            case ARRAY:
+                TextField arrayField = new TextField(String.join(",", param.getArrayValue().getValuesList()));
+                arrayField.setPrefWidth(200);
+                return arrayField;
+                
+            default:
+                return new TextField();
+        }
+    }
+    
+    private void runSimulation() {
+        if (client == null || !client.isConnected()) {
+            showAlert("Error", "Not connected to server");
+            return;
+        }
+        
+        currentSimulationId = UUID.randomUUID().toString();
+        String scriptPath = scriptPathField.getText();
+        String ugExecutable = ugExecutableField.getText();
+        String outputDir = outputDirField.getText();
+        
+        if (scriptPath.isEmpty() || ugExecutable.isEmpty()) {
+            showAlert("Error", "Please provide script path and UG executable");
+            return;
+        }
+        
+        List<ParameterValue> parameters = collectParameters();
+        
+        Platform.runLater(() -> {
+            runButton.setDisable(true);
+            stopButton.setDisable(false);
+            progressBar.setProgress(0);
+            progressLabel.setText("Starting simulation...");
+            logArea.clear();
+        });
+        
+        client.runSimulation(currentSimulationId, scriptPath, ugExecutable, parameters, outputDir,
+                new SimulationClient.SimulationListener() {
+                    @Override
+                    public void onProgress(double percentage, String message, int current, int total) {
+                        Platform.runLater(() -> {
+                            progressBar.setProgress(percentage / 100.0);
+                            progressLabel.setText(message);
+                        });
+                    }
+                    
+                    @Override
+                    public void onLog(LogLevel level, String message, long timestamp) {
+                        Platform.runLater(() -> log(message));
+                    }
+                    
+                    @Override
+                    public void onResult(SimulationResult result) {
+                        Platform.runLater(() -> {
+                            progressLabel.setText("Simulation " + result.getFinalState());
+                            log("Simulation completed in " + result.getDurationMs() + " ms");
+                            log("Output files: " + result.getOutputFilesList());
+                            resultsListView.getItems().addAll(result.getOutputFilesList());
+                        });
+                    }
+                    
+                    @Override
+                    public void onError(String error, String stackTrace) {
+                        Platform.runLater(() -> {
+                            log("ERROR: " + error);
+                            if (!stackTrace.isEmpty()) {
+                                log(stackTrace);
+                            }
+                            showAlert("Simulation Error", error);
+                        });
+                    }
+                    
+                    @Override
+                    public void onComplete() {
+                        Platform.runLater(() -> {
+                            runButton.setDisable(false);
+                            stopButton.setDisable(true);
+                            progressBar.setProgress(1.0);
+                        });
+                    }
+                });
+    }
+    
+    private List<ParameterValue> collectParameters() {
+        List<ParameterValue> parameters = new ArrayList<>();
+        
+        for (Map.Entry<String, Control> entry : parameterControls.entrySet()) {
+            String name = entry.getKey();
+            Control control = entry.getValue();
+            ParameterValue.Builder param = ParameterValue.newBuilder().setName(name);
+            
+            if (control instanceof TextField) {
+                param.setStringValue(((TextField) control).getText());
+            } else if (control instanceof Spinner<?>) {
+                Object value = ((Spinner<?>) control).getValue();
+                if (value instanceof Integer) {
+                    param.setIntValue((Integer) value);
+                } else if (value instanceof Double) {
+                    param.setFloatValue((Double) value);
+                }
+            } else if (control instanceof CheckBox) {
+                param.setBoolValue(((CheckBox) control).isSelected());
+            }
+            
+            parameters.add(param.build());
+        }
+        
+        return parameters;
+    }
+    
+    private void stopSimulation() {
+        if (client != null && currentSimulationId != null) {
+            if (client.stopSimulation(currentSimulationId)) {
+                Platform.runLater(() -> {
+                    progressLabel.setText("Simulation stopped");
+                    runButton.setDisable(false);
+                    stopButton.setDisable(true);
+                });
+            }
+        }
+    }
+    
+    private void refreshResults() {
+        // Implementation to refresh results from server
+    }
+    
+    private void downloadSelectedResult() {
+        String selected = resultsListView.getSelectionModel().getSelectedItem();
+        if (selected != null && currentSimulationId != null && client != null) {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setInitialFileName(new File(selected).getName());
+            File saveFile = fileChooser.showSaveDialog(resultsListView.getScene().getWindow());
+            
+            if (saveFile != null) {
+                client.getSimulationResults(currentSimulationId, Arrays.asList(selected),
+                        fileData -> {
+                            try (FileOutputStream fos = new FileOutputStream(saveFile)) {
+                                fos.write(fileData.getContent().toByteArray());
+                                Platform.runLater(() -> 
+                                        log("Downloaded: " + fileData.getFilename()));
+                            } catch (IOException e) {
+                                logger.error("Error saving file", e);
+                            }
+                        },
+                        () -> Platform.runLater(() -> log("Download complete"))
+                );
+            }
+        }
+    }
+    
+    private void log(String message) {
+        Platform.runLater(() -> {
+            logArea.appendText("[" + java.time.LocalTime.now() + "] " + message + "\n");
+        });
+    }
+    
+    private void showAlert(String title, String content) {
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle(title);
+            alert.setContentText(content);
+            alert.showAndWait();
+        });
+    }
+    
+    public static void main(String[] args) {
+        launch(args);
+    }
+}

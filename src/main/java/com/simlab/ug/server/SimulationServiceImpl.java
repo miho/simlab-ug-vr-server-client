@@ -9,9 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -292,6 +290,126 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
             logger.info("Completed sending results for simulation: " + simulationId);
         } catch (Exception e) {
             logger.error("Error getting simulation results", e);
+            responseObserver.onError(e);
+        }
+    }
+
+    @Override
+    public void subscribeResults(SubscribeResultsRequest request, StreamObserver<FileData> responseObserver) {
+        try {
+            String simulationId = request.getSimulationId();
+            java.util.List<String> patterns = request.getFilePatternsList();
+            boolean includeExisting = request.getIncludeExisting();
+
+            // Resolve output directory similar to getSimulationResults
+            Path outputDir;
+            SimulationExecutor executor = activeSimulations.get(simulationId);
+            if (executor != null && executor.getOutputDirectory() != null) {
+                File outDir = new File(executor.getOutputDirectory());
+                if (!outDir.isAbsolute()) {
+                    outDir = new File(workingDirectory, executor.getOutputDirectory());
+                }
+                outputDir = outDir.toPath();
+            } else if (completedSimulationDirs.containsKey(simulationId)) {
+                String completedDir = completedSimulationDirs.get(simulationId);
+                File outDir = new File(completedDir);
+                if (!outDir.isAbsolute()) {
+                    outDir = new File(workingDirectory, completedDir);
+                }
+                outputDir = outDir.toPath();
+            } else {
+                outputDir = Paths.get(workingDirectory);
+            }
+
+            if (!Files.exists(outputDir)) {
+                responseObserver.onCompleted();
+                return;
+            }
+
+            // Optionally send existing files first
+            if (includeExisting) {
+                try {
+                    Files.walk(outputDir)
+                            .filter(Files::isRegularFile)
+                            .filter(path -> matchesPatterns(path, patterns))
+                            .forEach(path -> {
+                                try {
+                                    byte[] content = Files.readAllBytes(path);
+                                    String mimeType = Files.probeContentType(path);
+                                    if (mimeType == null) mimeType = "application/octet-stream";
+                                    responseObserver.onNext(FileData.newBuilder()
+                                            .setFilename(path.getFileName().toString())
+                                            .setContent(com.google.protobuf.ByteString.copyFrom(content))
+                                            .setMimeType(mimeType)
+                                            .build());
+                                } catch (IOException e) {
+                                    logger.warn("Failed to read existing file: " + path, e);
+                                }
+                            });
+                } catch (IOException e) {
+                    logger.warn("Failed walking existing files", e);
+                }
+            }
+
+            // Setup watch service for new or modified files
+            WatchService watchService = FileSystems.getDefault().newWatchService();
+            // Register directories recursively
+            try {
+                Files.walk(outputDir)
+                        .filter(Files::isDirectory)
+                        .forEach(dir -> {
+                            try {
+                                dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
+                            } catch (IOException ignored) {}
+                        });
+            } catch (IOException e) {
+                logger.error("Failed to register watch service", e);
+                responseObserver.onError(e);
+                try { watchService.close(); } catch (IOException ignored) {}
+                return;
+            }
+
+            final WatchService ws = watchService;
+            Thread watcher = new Thread(() -> {
+                try {
+                    while (!Thread.currentThread().isInterrupted()) {
+                        WatchKey key = ws.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        if (key == null) continue;
+                        Path dir = (Path) key.watchable();
+                        for (WatchEvent<?> event : key.pollEvents()) {
+                            if (!(event.context() instanceof Path)) continue;
+                            Path name = (Path) event.context();
+                            Path child = dir.resolve(name);
+                            if (!Files.isRegularFile(child)) continue;
+                            if (!matchesPatterns(child, patterns)) continue;
+                            try {
+                                byte[] content = Files.readAllBytes(child);
+                                String mimeType = Files.probeContentType(child);
+                                if (mimeType == null) mimeType = "application/octet-stream";
+                                responseObserver.onNext(FileData.newBuilder()
+                                        .setFilename(child.getFileName().toString())
+                                        .setContent(com.google.protobuf.ByteString.copyFrom(content))
+                                        .setMimeType(mimeType)
+                                        .build());
+                            } catch (IOException e) {
+                                logger.warn("Failed to read changed file: " + child, e);
+                            }
+                        }
+                        boolean valid = key.reset();
+                        if (!valid) break;
+                    }
+                } catch (InterruptedException ignored) {
+                } finally {
+                    try { ws.close(); } catch (IOException ignored) {}
+                }
+            }, "SubscribeResultsWatcher");
+            watcher.setDaemon(true);
+            watcher.start();
+
+            // Note: do not call onCompleted here; keep stream open until client cancels
+
+        } catch (Exception e) {
+            logger.error("Error in subscribeResults", e);
             responseObserver.onError(e);
         }
     }

@@ -47,6 +47,8 @@ public class ClientApplication extends Application {
     private TextArea logArea;
     private ListView<String> resultsListView;
     private ResultsTabController resultsController;
+    private FileSyncManager fileSyncManager;
+    private LocalGltfServerManager localGltfServerManager;
     
     private String currentSimulationId;
     
@@ -59,8 +61,9 @@ public class ClientApplication extends Application {
         Tab connectionTab = createConnectionTab();
         Tab simulationTab = createSimulationTab();
         Tab resultsTab = createResultsTab();
+        Tab gltfServerTab = createGltfServerTab();
         
-        tabPane.getTabs().addAll(connectionTab, simulationTab, resultsTab);
+        tabPane.getTabs().addAll(connectionTab, simulationTab, resultsTab, gltfServerTab);
         
         Scene scene = new Scene(tabPane, 900, 700);
         primaryStage.setScene(scene);
@@ -70,6 +73,9 @@ public class ClientApplication extends Application {
         primaryStage.setOnCloseRequest(event -> {
             if (client != null) {
                 client.shutdown();
+            }
+            if (localGltfServerManager != null) {
+                localGltfServerManager.stop();
             }
             Platform.exit();
         });
@@ -245,10 +251,106 @@ public class ClientApplication extends Application {
         
         // Store reference for later use
         this.resultsController = resultsController;
+        // Initialize local managers
+        this.fileSyncManager = null;
         
         tab.setContent(resultsContent);
         
         return tab;
+    }
+
+    private Tab createGltfServerTab() {
+        Tab tab = new Tab("GLTF Server");
+        tab.setClosable(false);
+
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+
+        Label info = new Label("Serve GLTF files locally from the client's output directory.");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+
+        Label portLabel = new Label("Port:");
+        TextField portField = new TextField("50555");
+        portField.setPrefWidth(120);
+
+        Label rootLabel = new Label("Root Directory:");
+        TextField rootField = new TextField();
+        rootField.setPrefWidth(400);
+
+        Button useResultsDirBtn = new Button("Use Results Directory");
+        useResultsDirBtn.setOnAction(e -> {
+            if (resultsController != null) {
+                rootField.setText(resultsController != null ? getResultsOutputDir() : "");
+            }
+        });
+
+        Button startBtn = new Button("Start");
+        startBtn.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
+        Button stopBtn = new Button("Stop");
+        stopBtn.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
+        stopBtn.setDisable(true);
+
+        Button applyGroupsBtn = new Button("Sync Groups from Results");
+        applyGroupsBtn.setOnAction(e -> {
+            if (localGltfServerManager != null && resultsController != null) {
+                localGltfServerManager.setGroupPatterns(resultsController.getGltfGroupPatterns());
+            }
+        });
+
+        startBtn.setOnAction(e -> {
+            try {
+                int port = Integer.parseInt(portField.getText());
+                String root = rootField.getText().isEmpty() ? getResultsOutputDir() : rootField.getText();
+                if (localGltfServerManager != null) {
+                    localGltfServerManager.stop();
+                }
+                localGltfServerManager = new LocalGltfServerManager(port, root);
+                if (resultsController != null) {
+                    localGltfServerManager.setGroupPatterns(resultsController.getGltfGroupPatterns());
+                }
+                localGltfServerManager.start();
+                startBtn.setDisable(true);
+                stopBtn.setDisable(false);
+            } catch (Exception ex) {
+                showAlert("GLTF Server Error", ex.getMessage());
+            }
+        });
+
+        stopBtn.setOnAction(e -> {
+            if (localGltfServerManager != null) {
+                localGltfServerManager.stop();
+                startBtn.setDisable(false);
+                stopBtn.setDisable(true);
+            }
+        });
+
+        grid.add(portLabel, 0, 0);
+        grid.add(portField, 1, 0);
+        grid.add(rootLabel, 0, 1);
+        grid.add(rootField, 1, 1);
+        grid.add(useResultsDirBtn, 2, 1);
+        grid.add(startBtn, 0, 2);
+        grid.add(stopBtn, 1, 2);
+        grid.add(applyGroupsBtn, 2, 2);
+
+        content.getChildren().addAll(info, grid);
+        tab.setContent(content);
+        return tab;
+    }
+
+    private String getResultsOutputDir() {
+        try {
+            java.lang.reflect.Field f = ResultsTabController.class.getDeclaredField("currentOutputDirectory");
+            f.setAccessible(true);
+            Object val = f.get(resultsController);
+            if (val instanceof java.nio.file.Path) {
+                return ((java.nio.file.Path) val).toString();
+            }
+        } catch (Exception ignored) {}
+        return outputDirField != null ? outputDirField.getText() : "";
     }
     
     private void connectToServer() {
@@ -559,6 +661,14 @@ public class ClientApplication extends Application {
                         });
                     }
                 });
+
+        // Start VTU file sync to client output directory (initial + live updates)
+        if (fileSyncManager == null && client != null) {
+            fileSyncManager = new FileSyncManager(client);
+        }
+        if (fileSyncManager != null && outputDir != null && !outputDir.isEmpty()) {
+            fileSyncManager.startSync(currentSimulationId, java.util.Arrays.asList("*.vtu"), true, outputDir);
+        }
     }
     
     private List<ParameterValue> collectParameters() {

@@ -21,6 +21,7 @@ public class ResultsServiceImpl extends ResultsServiceGrpc.ResultsServiceImplBas
     private final ExecutorService watcherExecutor = Executors.newCachedThreadPool();
 
     private volatile String defaultRootDirectory;
+    private volatile List<String> allowedPatterns = null; // optional whitelist patterns provided by client
 
     public ResultsServiceImpl(String defaultRootDirectory) {
         this.defaultRootDirectory = defaultRootDirectory;
@@ -30,12 +31,27 @@ public class ResultsServiceImpl extends ResultsServiceGrpc.ResultsServiceImplBas
         this.defaultRootDirectory = dir;
     }
 
+    // Optional: restrict which groups/files are exposed by pattern (glob) list
+    public void setAllowedPatterns(List<String> patterns) {
+        this.allowedPatterns = patterns;
+    }
+
     @Override
     public void listGltfGroups(ListGltfGroupsRequest request, StreamObserver<ListGltfGroupsResponse> responseObserver) {
         try {
             String root = request.getRootDirectory().isEmpty() ? defaultRootDirectory : request.getRootDirectory();
             Path rootPath = Paths.get(root);
             List<GltfGroup> groups = groupManager.scanForGroups(rootPath);
+            if (allowedPatterns != null && !allowedPatterns.isEmpty()) {
+                java.util.regex.Pattern any = java.util.regex.Pattern.compile(
+                    allowedPatterns.stream()
+                        .map(p -> p.replace(".", "\\.").replace("*", ".*") )
+                        .reduce((a,b) -> a + "|" + b)
+                        .orElse(".*"));
+                groups = groups.stream()
+                        .filter(g -> any.matcher(g.getGroupName()).matches() || any.matcher(g.getPattern()).matches())
+                        .toList();
+            }
             ListGltfGroupsResponse resp = ListGltfGroupsResponse.newBuilder().addAllGroups(groups).build();
             responseObserver.onNext(resp);
             responseObserver.onCompleted();
@@ -187,5 +203,6 @@ public class ResultsServiceImpl extends ResultsServiceGrpc.ResultsServiceImplBas
         });
     }
 }
+
 
 

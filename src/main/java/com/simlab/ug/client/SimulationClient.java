@@ -189,4 +189,31 @@ public class SimulationClient {
             return false;
         }
     }
+
+    public void subscribeResults(String simulationId, List<String> filePatterns, boolean includeExisting,
+                                 Consumer<FileData> fileHandler, Consumer<Throwable> onError) {
+        SubscribeResultsRequest request = SubscribeResultsRequest.newBuilder()
+                .setSimulationId(simulationId)
+                .addAllFilePatterns(filePatterns)
+                .setIncludeExisting(includeExisting)
+                .build();
+
+        asyncStub.subscribeResults(request, new io.grpc.stub.StreamObserver<FileData>() {
+            @Override
+            public void onNext(FileData value) {
+                fileHandler.accept(value);
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                logger.error("subscribeResults error", t);
+                if (onError != null) onError.accept(t);
+            }
+
+            @Override
+            public void onCompleted() {
+                // keep-alive stream typically doesn't complete; noop
+            }
+        });
+    }
 }

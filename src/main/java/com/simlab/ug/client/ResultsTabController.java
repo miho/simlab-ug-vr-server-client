@@ -760,4 +760,11 @@ public class ResultsTabController {
         vtu2gltfPathField.setText(path);
         vtu2gltfExecutable = path;
     }
+
+    // Provide GLTF group patterns based on current VTU groups and conversion config
+    public java.util.List<String> getGltfGroupPatterns() {
+        return fileGroups.stream()
+                .map(VtuFileGroup::getPattern)
+                .collect(Collectors.toList());
+    }
 }

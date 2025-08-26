@@ -20,6 +20,8 @@ service SimulationService {
     
     // File operations
     rpc GetSimulationResults(GetResultsRequest) returns (stream FileData);
+    // Stream results: send matching files initially (optional) and on changes
+    rpc SubscribeResults(SubscribeResultsRequest) returns (stream FileData);
 }
 
 // Service for publishing GLTF results grouped with time-series semantics and live updates
@@ -179,6 +181,12 @@ message ErrorMessage {
 message GetResultsRequest {
     string simulation_id = 1;
     repeated string file_patterns = 2;
+}
+
+message SubscribeResultsRequest {
+    string simulation_id = 1;
+    repeated string file_patterns = 2; // e.g., ["*.vtu"]
+    bool include_existing = 3;         // if true, send existing matching files first
 }
 
 message FileData {

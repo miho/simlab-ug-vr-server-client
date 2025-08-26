@@ -21,6 +21,11 @@ import java.io.IOException;
 import java.util.*;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class ClientApplication extends Application {
     private static final Logger logger = LoggerFactory.getLogger(ClientApplication.class);
@@ -51,6 +56,16 @@ public class ClientApplication extends Application {
     private LocalGltfServerManager localGltfServerManager;
     
     private String currentSimulationId;
+    
+    // Throttling/batching for logs and progress updates (helps JPro performance)
+    private final ConcurrentLinkedQueue<String> pendingLogLines = new ConcurrentLinkedQueue<>();
+    private volatile boolean logFlushScheduled = false;
+    private static final ScheduledExecutorService uiBatchExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "ui-batch-client");
+        t.setDaemon(true);
+        return t;
+    });
+    private long lastProgressUiUpdateMs = 0L;
     
     @Override
     public void start(Stage primaryStage) {
@@ -611,15 +626,19 @@ public class ClientApplication extends Application {
                 new SimulationClient.SimulationListener() {
                     @Override
                     public void onProgress(double percentage, String message, int current, int total) {
-                        Platform.runLater(() -> {
-                            progressBar.setProgress(percentage / 100.0);
-                            progressLabel.setText(message);
-                        });
+                        long now = System.currentTimeMillis();
+                        if (now - lastProgressUiUpdateMs >= 100) { // max ~10 updates/sec
+                            lastProgressUiUpdateMs = now;
+                            Platform.runLater(() -> {
+                                progressBar.setProgress(percentage / 100.0);
+                                progressLabel.setText(message);
+                            });
+                        }
                     }
                     
                     @Override
                     public void onLog(LogLevel level, String message, long timestamp) {
-                        Platform.runLater(() -> log(message));
+                        log(message);
                     }
                     
                     @Override
@@ -736,13 +755,17 @@ public class ClientApplication extends Application {
     
     private void stopSimulation() {
         if (client != null && currentSimulationId != null) {
-            if (client.stopSimulation(currentSimulationId)) {
-                Platform.runLater(() -> {
-                    progressLabel.setText("Simulation stopped");
-                    runButton.setDisable(false);
-                    stopButton.setDisable(true);
-                });
-            }
+            CompletableFuture
+                .supplyAsync(() -> client.stopSimulation(currentSimulationId))
+                .thenAccept(success -> Platform.runLater(() -> {
+                    if (success) {
+                        progressLabel.setText("Simulation stopped");
+                        runButton.setDisable(false);
+                        stopButton.setDisable(true);
+                    } else {
+                        showAlert("Error", "Failed to stop simulation");
+                    }
+                }));
         }
     }
     
@@ -805,9 +828,32 @@ public class ClientApplication extends Application {
     }
     
     private void log(String message) {
-        Platform.runLater(() -> {
-            logArea.appendText("[" + java.time.LocalTime.now() + "] " + message + "\n");
-        });
+        pendingLogLines.add("[" + java.time.LocalTime.now() + "] " + message + "\n");
+        scheduleLogFlush();
+    }
+    
+    private void scheduleLogFlush() {
+        if (logFlushScheduled) return;
+        logFlushScheduled = true;
+        uiBatchExecutor.schedule(() -> Platform.runLater(() -> {
+            try {
+                StringBuilder batch = new StringBuilder();
+                String line;
+                int appended = 0;
+                while ((line = pendingLogLines.poll()) != null && appended < 1000) {
+                    batch.append(line);
+                    appended++;
+                }
+                if (batch.length() > 0 && logArea != null) {
+                    logArea.appendText(batch.toString());
+                }
+            } finally {
+                logFlushScheduled = false;
+                if (!pendingLogLines.isEmpty()) {
+                    scheduleLogFlush();
+                }
+            }
+        }), 100, TimeUnit.MILLISECONDS);
     }
     
     private void showAlert(String title, String content) {
@@ -815,7 +861,8 @@ public class ClientApplication extends Application {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle(title);
             alert.setContentText(content);
-            alert.showAndWait();
+            // JPro-friendly non-blocking alert
+            alert.show();
         });
     }
     

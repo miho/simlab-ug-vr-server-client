@@ -299,7 +299,8 @@ public class ServerApplication extends Application {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle(title);
             alert.setContentText(content);
-            alert.showAndWait();
+            // JPro-friendly non-blocking alert
+            alert.show();
         });
     }
     

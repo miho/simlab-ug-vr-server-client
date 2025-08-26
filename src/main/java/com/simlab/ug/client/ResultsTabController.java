@@ -23,6 +23,10 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Controller for the enhanced Results tab with VTU grouping and GLTF conversion
@@ -46,6 +50,16 @@ public class ResultsTabController {
     
     // Configuration
     private String vtu2gltfExecutable = "";
+    
+    // Throttling for conversion logs (better in JPro)
+    private final ConcurrentLinkedQueue<String> pendingConversionLogs = new ConcurrentLinkedQueue<>();
+    private volatile boolean conversionFlushScheduled = false;
+    private static final ScheduledExecutorService uiBatchExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "ui-batch-results");
+        t.setDaemon(true);
+        return t;
+    });
+    private long lastStatusUiUpdateMs = 0L;
     
     public VBox createResultsTab() {
         root = new VBox(10);
@@ -439,18 +453,18 @@ public class ResultsTabController {
         dialog.setHeaderText("Enter file pattern for the new group");
         dialog.setContentText("Pattern:");
         
-        Optional<String> result = dialog.showAndWait();
-        result.ifPresent(pattern -> {
-            String groupName = pattern.replace("*", "").replace(".vtu", "");
-            VtuFileGroup newGroup = new VtuFileGroup(groupName, pattern);
-            
-            // Scan for files matching this pattern
-            if (currentOutputDirectory != null) {
-                rescanGroup(newGroup);
+        dialog.setOnHidden(e -> {
+            String pattern = dialog.getResult();
+            if (pattern != null) {
+                String groupName = pattern.replace("*", "").replace(".vtu", "");
+                VtuFileGroup newGroup = new VtuFileGroup(groupName, pattern);
+                if (currentOutputDirectory != null) {
+                    rescanGroup(newGroup);
+                }
+                fileGroups.add(newGroup);
             }
-            
-            fileGroups.add(newGroup);
         });
+        dialog.show();
     }
     
     private void rescanGroup(VtuFileGroup group) {
@@ -481,14 +495,15 @@ public class ResultsTabController {
         VtuFileGroup selected = groupsTable.getSelectionModel().getSelectedItem();
         if (selected != null) {
             EditGroupDialog dialog = new EditGroupDialog(selected);
-            Optional<VtuFileGroup> result = dialog.showAndWait();
-            
-            result.ifPresent(group -> {
-                // Rescan files with new pattern
-                rescanGroup(group);
-                groupsTable.refresh();
-                log("Updated group: " + group.getGroupName());
+            dialog.setOnHidden(e -> {
+                VtuFileGroup group = dialog.getResult();
+                if (group != null) {
+                    rescanGroup(group);
+                    groupsTable.refresh();
+                    log("Updated group: " + group.getGroupName());
+                }
             });
+            dialog.show();
         }
     }
     
@@ -508,13 +523,14 @@ public class ResultsTabController {
     
     private void configureGroup(VtuFileGroup group) {
         VtuConversionDialog dialog = new VtuConversionDialog(group);
-        Optional<Map<String, String>> result = dialog.showAndWait();
-        
-        result.ifPresent(options -> {
-            // Options are already updated in the group
-            groupsTable.refresh();
-            log("Updated conversion options for group: " + group.getGroupName());
+        dialog.setOnHidden(e -> {
+            Map<String, String> options = dialog.getResult();
+            if (options != null) {
+                groupsTable.refresh();
+                log("Updated conversion options for group: " + group.getGroupName());
+            }
         });
+        dialog.show();
     }
     
     private void convertSelectedGroups() {
@@ -573,14 +589,18 @@ public class ResultsTabController {
                     processedFiles++;
                     final int currentFile = processedFiles;
                     
-                    Platform.runLater(() -> {
-                        statusLabel.setText(String.format("Converting %s - %s (%d/%d)", 
-                            group.getGroupName(), 
-                            vtuFile.getFilename(),
-                            currentFile, 
-                            totalFiles));
-                        conversionProgress.setProgress((double) currentFile / totalFiles);
-                    });
+                    long now = System.currentTimeMillis();
+                    if (now - lastStatusUiUpdateMs >= 100) { // throttle
+                        lastStatusUiUpdateMs = now;
+                        Platform.runLater(() -> {
+                            statusLabel.setText(String.format("Converting %s - %s (%d/%d)", 
+                                group.getGroupName(), 
+                                vtuFile.getFilename(),
+                                currentFile, 
+                                totalFiles));
+                            conversionProgress.setProgress((double) currentFile / totalFiles);
+                        });
+                    }
                     
                     // Generate output filename for this specific file
                     String outputFilename = generateOutputFilename(group, vtuFile);
@@ -612,28 +632,25 @@ public class ResultsTabController {
                         String line;
                         while ((line = stdoutReader.readLine()) != null) {
                             final String output = line;
-                            Platform.runLater(() -> log("  " + output));
+                            log("  " + output);
                         }
                         
                         // Read stderr
                         while ((line = stderrReader.readLine()) != null) {
                             final String error = line;
-                            Platform.runLater(() -> log("  ERROR: " + error));
+                            log("  ERROR: " + error);
                         }
                         
                         int exitCode = process.waitFor();
                         if (exitCode == 0) {
-                            Platform.runLater(() -> 
-                                log("  ✓ Successfully converted: " + outputFilename));
+                            log("  ✓ Successfully converted: " + outputFilename);
                         } else {
-                            Platform.runLater(() -> 
-                                log("  ✗ Failed to convert " + vtuFile.getFilename() + 
-                                    " (exit code: " + exitCode + ")"));
+                            log("  ✗ Failed to convert " + vtuFile.getFilename() + 
+                                " (exit code: " + exitCode + ")");
                         }
                         
                     } catch (Exception e) {
-                        Platform.runLater(() -> 
-                            log("  ✗ Error converting " + vtuFile.getFilename() + ": " + e.getMessage()));
+                        log("  ✗ Error converting " + vtuFile.getFilename() + ": " + e.getMessage());
                     }
                 }
             }
@@ -735,9 +752,32 @@ public class ResultsTabController {
     }
     
     private void log(String message) {
-        Platform.runLater(() -> {
-            conversionLogArea.appendText("[" + java.time.LocalTime.now() + "] " + message + "\n");
-        });
+        pendingConversionLogs.add("[" + java.time.LocalTime.now() + "] " + message + "\n");
+        scheduleConversionLogFlush();
+    }
+    
+    private void scheduleConversionLogFlush() {
+        if (conversionFlushScheduled) return;
+        conversionFlushScheduled = true;
+        uiBatchExecutor.schedule(() -> Platform.runLater(() -> {
+            try {
+                StringBuilder batch = new StringBuilder();
+                String line;
+                int appended = 0;
+                while ((line = pendingConversionLogs.poll()) != null && appended < 1000) {
+                    batch.append(line);
+                    appended++;
+                }
+                if (batch.length() > 0 && conversionLogArea != null) {
+                    conversionLogArea.appendText(batch.toString());
+                }
+            } finally {
+                conversionFlushScheduled = false;
+                if (!pendingConversionLogs.isEmpty()) {
+                    scheduleConversionLogFlush();
+                }
+            }
+        }), 100, TimeUnit.MILLISECONDS);
     }
     
     private void showAlert(String title, String content) {
@@ -747,7 +787,8 @@ public class ResultsTabController {
             );
             alert.setTitle(title);
             alert.setContentText(content);
-            alert.showAndWait();
+            // JPro-friendly non-blocking alert
+            alert.show();
         });
     }
     

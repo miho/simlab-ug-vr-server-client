@@ -3,6 +3,7 @@ plugins {
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'com.google.protobuf' version '0.9.4'
+    id 'jpro-gradle-plugin'
 }
 
 group = 'com.simlab'
@@ -64,23 +65,27 @@ protobuf {
 }
 
 application {
-    mainClass = 'com.simlab.ug.server.ServerApplication'
+    mainClass = 'com.simlab.ug.client.ClientApplication'
 }
 
-// Task to run the client
+// 
 task runClient(type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.simlab.ug.client.ClientApplication'
-    jvmArgs = ['--module-path', classpath.asPath,
-               '--add-modules', 'javafx.controls,javafx.fxml']
+    doFirst {
+        jvmArgs = ['--module-path', sourceSets.main.runtimeClasspath.asPath,
+                   '--add-modules', 'javafx.controls,javafx.fxml']
+    }
 }
 
-// Task to run the client
-task runClient2(type: JavaExec) {
+// 
+task runServer(type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.simlab.ug.client.ClientApplication'
-    jvmArgs = ['--module-path', classpath.asPath,
-               '--add-modules', 'javafx.controls,javafx.fxml']
+    mainClass = 'com.simlab.ug.server.ServerApplication'
+    doFirst {
+        jvmArgs = ['--module-path', sourceSets.main.runtimeClasspath.asPath,
+                   '--add-modules', 'javafx.controls,javafx.fxml']
+    }
 }
 
 sourceSets {
@@ -91,4 +96,9 @@ sourceSets {
                        'build/generated/source/proto/main/java']
         }
     }
+}
+
+jpro {
+    // jpro server port
+    port = 8080
 }

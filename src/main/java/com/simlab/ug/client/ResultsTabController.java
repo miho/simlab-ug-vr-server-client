@@ -7,11 +7,15 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.Node;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+import com.jpro.webapi.WebAPI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +100,15 @@ public class ResultsTabController {
         Label label = new Label("Output Directory:");
         outputDirField = new TextField();
         outputDirField.setPrefWidth(400);
+        // Keep currentOutputDirectory in sync when user types
+        outputDirField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null && !newVal.isEmpty()) {
+                Path p = Paths.get(newVal);
+                if (Files.exists(p)) {
+                    currentOutputDirectory = p;
+                }
+            }
+        });
         
         Button browseBtn = new Button("Browse...");
         browseBtn.setOnAction(e -> browseForOutputDirectory());
@@ -125,6 +138,10 @@ public class ResultsTabController {
         vtu2gltfPathField = new TextField();
         vtu2gltfPathField.setPrefWidth(400);
         vtu2gltfPathField.setPromptText("Path to vtu2gltf.exe");
+        // Keep vtu2gltfExecutable in sync when user types
+        vtu2gltfPathField.textProperty().addListener((obs, oldVal, newVal) -> {
+            vtu2gltfExecutable = newVal != null ? newVal : "";
+        });
         
         Button browseBtn = new Button("Browse...");
         browseBtn.setOnAction(e -> browseForVtu2gltf());
@@ -448,14 +465,26 @@ public class ResultsTabController {
     }
     
     private void addNewGroup() {
-        TextInputDialog dialog = new TextInputDialog("*sol_*.vtu");
-        dialog.setTitle("Add File Group");
-        dialog.setHeaderText("Enter file pattern for the new group");
-        dialog.setContentText("Pattern:");
+        VBox box = new VBox(10);
+        box.setPadding(new Insets(16));
+        Label title = new Label("Add File Group");
+        title.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
+        Label prompt = new Label("Enter file pattern for the new group");
+        TextField patternField = new TextField("*sol_*.vtu");
+        HBox buttons = new HBox(10);
+        Button ok = new Button("Add");
+        Button cancel = new Button("Cancel");
+        buttons.getChildren().addAll(ok, cancel);
+        VBox content = new VBox(10, title, prompt, patternField, buttons);
+        content.setPadding(new Insets(16));
         
-        dialog.setOnHidden(e -> {
-            String pattern = dialog.getResult();
-            if (pattern != null) {
+        Stage owner = (Stage) root.getScene().getWindow();
+        Stage popup = new Stage();
+        popup.initOwner(owner);
+        popup.setScene(new Scene(content));
+        ok.setOnAction(e -> {
+            String pattern = patternField.getText();
+            if (pattern != null && !pattern.trim().isEmpty()) {
                 String groupName = pattern.replace("*", "").replace(".vtu", "");
                 VtuFileGroup newGroup = new VtuFileGroup(groupName, pattern);
                 if (currentOutputDirectory != null) {
@@ -463,8 +492,20 @@ public class ResultsTabController {
                 }
                 fileGroups.add(newGroup);
             }
+            popup.close();
         });
-        dialog.show();
+        cancel.setOnAction(e -> popup.close());
+        
+        try {
+            WebAPI webAPI = WebAPI.getWebAPI(owner);
+            if (webAPI != null) {
+                webAPI.openStageAsPopup(popup);
+            } else {
+                popup.show();
+            }
+        } catch (Throwable t) {
+            popup.show();
+        }
     }
     
     private void rescanGroup(VtuFileGroup group) {
@@ -495,15 +536,39 @@ public class ResultsTabController {
         VtuFileGroup selected = groupsTable.getSelectionModel().getSelectedItem();
         if (selected != null) {
             EditGroupDialog dialog = new EditGroupDialog(selected);
-            dialog.setOnHidden(e -> {
-                VtuFileGroup group = dialog.getResult();
-                if (group != null) {
-                    rescanGroup(group);
-                    groupsTable.refresh();
-                    log("Updated group: " + group.getGroupName());
-                }
+            Node dlgContent = dialog.getDialogPane().getContent();
+            VBox container = new VBox(10, dlgContent);
+            container.setPadding(new Insets(16));
+            HBox buttons = new HBox(10);
+            Button save = new Button("Save");
+            Button cancel = new Button("Cancel");
+            buttons.getChildren().addAll(save, cancel);
+            container.getChildren().add(buttons);
+            
+            Stage owner = (Stage) root.getScene().getWindow();
+            Stage popup = new Stage();
+            popup.initOwner(owner);
+            popup.setScene(new Scene(container));
+            save.setOnAction(e -> {
+                ButtonType ok = ButtonType.OK;
+                dialog.getResultConverter().call(ok);
+                rescanGroup(selected);
+                groupsTable.refresh();
+                log("Updated group: " + selected.getGroupName());
+                popup.close();
             });
-            dialog.show();
+            cancel.setOnAction(e -> popup.close());
+            
+            try {
+                WebAPI webAPI = WebAPI.getWebAPI(owner);
+                if (webAPI != null) {
+                    webAPI.openStageAsPopup(popup);
+                } else {
+                    popup.show();
+                }
+            } catch (Throwable t) {
+                popup.show();
+            }
         }
     }
     
@@ -523,14 +588,38 @@ public class ResultsTabController {
     
     private void configureGroup(VtuFileGroup group) {
         VtuConversionDialog dialog = new VtuConversionDialog(group);
-        dialog.setOnHidden(e -> {
-            Map<String, String> options = dialog.getResult();
-            if (options != null) {
-                groupsTable.refresh();
-                log("Updated conversion options for group: " + group.getGroupName());
-            }
+        Node dlgContent = dialog.getDialogPane().getContent();
+        VBox container = new VBox(10, dlgContent);
+        container.setPadding(new Insets(16));
+        HBox buttons = new HBox(10);
+        Button save = new Button("Save");
+        Button cancel = new Button("Cancel");
+        buttons.getChildren().addAll(save, cancel);
+        container.getChildren().add(buttons);
+        
+        Stage owner = (Stage) root.getScene().getWindow();
+        Stage popup = new Stage();
+        popup.initOwner(owner);
+        popup.setScene(new Scene(container));
+        save.setOnAction(e -> {
+            ButtonType ok = ButtonType.OK;
+            dialog.getResultConverter().call(ok);
+            groupsTable.refresh();
+            log("Updated conversion options for group: " + group.getGroupName());
+            popup.close();
         });
-        dialog.show();
+        cancel.setOnAction(e -> popup.close());
+        
+        try {
+            WebAPI webAPI = WebAPI.getWebAPI(owner);
+            if (webAPI != null) {
+                webAPI.openStageAsPopup(popup);
+            } else {
+                popup.show();
+            }
+        } catch (Throwable t) {
+            popup.show();
+        }
     }
     
     private void convertSelectedGroups() {
@@ -568,6 +657,15 @@ public class ResultsTabController {
     private void performConversion(List<VtuFileGroup> groups) {
         if (vtu2gltfExecutable.isEmpty()) {
             showAlert("Error", "Please specify the vtu2gltf tool path");
+            return;
+        }
+        if (currentOutputDirectory == null || !Files.exists(currentOutputDirectory)) {
+            showAlert("Error", "Please set a valid output directory before converting");
+            return;
+        }
+        java.io.File exe = new java.io.File(vtu2gltfExecutable);
+        if (!exe.exists() || !exe.canExecute()) {
+            showAlert("Error", "vtu2gltf executable not found or not executable: " + vtu2gltfExecutable);
             return;
         }
         
@@ -622,26 +720,37 @@ public class ResultsTabController {
                         
                         Process process = pb.start();
                         
-                        // Read output (capture both stdout and stderr)
+                        // Read output (capture both stdout and stderr) concurrently
                         BufferedReader stdoutReader = new BufferedReader(
                             new InputStreamReader(process.getInputStream()));
                         BufferedReader stderrReader = new BufferedReader(
                             new InputStreamReader(process.getErrorStream()));
-                        
-                        // Read stdout
-                        String line;
-                        while ((line = stdoutReader.readLine()) != null) {
-                            final String output = line;
-                            log("  " + output);
-                        }
-                        
-                        // Read stderr
-                        while ((line = stderrReader.readLine()) != null) {
-                            final String error = line;
-                            log("  ERROR: " + error);
-                        }
+                        Thread outThread = new Thread(() -> {
+                            try {
+                                String line;
+                                while ((line = stdoutReader.readLine()) != null) {
+                                    final String output = line;
+                                    log("  " + output);
+                                }
+                            } catch (IOException ignored) {}
+                        }, "vtu-convert-stdout");
+                        Thread errThread = new Thread(() -> {
+                            try {
+                                String line;
+                                while ((line = stderrReader.readLine()) != null) {
+                                    final String error = line;
+                                    log("  ERROR: " + error);
+                                }
+                            } catch (IOException ignored) {}
+                        }, "vtu-convert-stderr");
+                        outThread.setDaemon(true);
+                        errThread.setDaemon(true);
+                        outThread.start();
+                        errThread.start();
                         
                         int exitCode = process.waitFor();
+                        try { outThread.join(500); } catch (InterruptedException ignored) {}
+                        try { errThread.join(500); } catch (InterruptedException ignored) {}
                         if (exitCode == 0) {
                             log("  ✓ Successfully converted: " + outputFilename);
                         } else {
@@ -770,6 +879,7 @@ public class ResultsTabController {
                 }
                 if (batch.length() > 0 && conversionLogArea != null) {
                     conversionLogArea.appendText(batch.toString());
+                    trimTextAreaToLastLines(conversionLogArea, 100);
                 }
             } finally {
                 conversionFlushScheduled = false;
@@ -782,14 +892,53 @@ public class ResultsTabController {
     
     private void showAlert(String title, String content) {
         Platform.runLater(() -> {
-            Alert alert = new Alert(
-                title.equals("Error") ? Alert.AlertType.ERROR : Alert.AlertType.INFORMATION
-            );
-            alert.setTitle(title);
-            alert.setContentText(content);
-            // JPro-friendly non-blocking alert
-            alert.show();
+            try {
+                Stage owner = (Stage) root.getScene().getWindow();
+                WebAPI webAPI = WebAPI.getWebAPI(owner);
+                VBox box = new VBox(10);
+                box.setPadding(new Insets(16));
+                Label titleLabel = new Label(title);
+                titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
+                Label contentLabel = new Label(content);
+                contentLabel.setWrapText(true);
+                Button closeBtn = new Button("Close");
+
+                Stage popup = new Stage();
+                popup.initOwner(owner);
+                VBox rootBox = new VBox(10, box, new HBox(10, closeBtn));
+                rootBox.setPadding(new Insets(16));
+                box.getChildren().addAll(titleLabel, contentLabel);
+                popup.setScene(new Scene(rootBox));
+                closeBtn.setOnAction(e -> popup.close());
+
+                if (webAPI != null) {
+                    webAPI.openStageAsPopup(popup);
+                } else {
+                    popup.show();
+                }
+            } catch (Throwable t) {
+                Alert alert = new Alert(
+                    title.equals("Error") ? Alert.AlertType.ERROR : Alert.AlertType.INFORMATION
+                );
+                alert.setTitle(title);
+                alert.setContentText(content);
+                alert.show();
+            }
         });
+    }
+
+    private void trimTextAreaToLastLines(TextArea area, int maxLines) {
+        String text = area.getText();
+        int lines = 0;
+        for (int i = text.length() - 1; i >= 0; i--) {
+            if (text.charAt(i) == '\n') {
+                lines++;
+                if (lines > maxLines) {
+                    area.deleteText(0, i);
+                    break;
+                }
+            }
+        }
     }
     
     public void setOutputDirectory(String directory) {

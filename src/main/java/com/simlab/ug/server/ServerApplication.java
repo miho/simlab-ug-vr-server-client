@@ -10,6 +10,7 @@ import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import com.jpro.webapi.WebAPI;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import org.slf4j.Logger;
@@ -296,11 +297,36 @@ public class ServerApplication extends Application {
     
     private void showAlert(String title, String content) {
         Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(title);
-            alert.setContentText(content);
-            // JPro-friendly non-blocking alert
-            alert.show();
+            try {
+                Stage owner = (Stage) statusLabel.getScene().getWindow();
+                WebAPI webAPI = WebAPI.getWebAPI(owner);
+                VBox box = new VBox(10);
+                box.setPadding(new Insets(16));
+                Label titleLabel = new Label(title);
+                titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
+                Label contentLabel = new Label(content);
+                contentLabel.setWrapText(true);
+                Button closeBtn = new Button("Close");
+
+                Stage popup = new Stage();
+                popup.initOwner(owner);
+                VBox root = new VBox(10, box, new HBox(10, closeBtn));
+                root.setPadding(new Insets(16));
+                box.getChildren().addAll(titleLabel, contentLabel);
+                popup.setScene(new Scene(root));
+                closeBtn.setOnAction(e -> popup.close());
+
+                if (webAPI != null) {
+                    webAPI.openStageAsPopup(popup);
+                } else {
+                    popup.show();
+                }
+            } catch (Throwable t) {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle(title);
+                alert.setContentText(content);
+                alert.show();
+            }
         });
     }
     

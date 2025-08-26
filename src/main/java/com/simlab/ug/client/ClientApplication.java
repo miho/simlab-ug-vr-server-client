@@ -14,6 +14,7 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.jpro.webapi.WebAPI;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -66,10 +67,12 @@ public class ClientApplication extends Application {
         return t;
     });
     private long lastProgressUiUpdateMs = 0L;
+    private Stage primaryStage;
     
     @Override
     public void start(Stage primaryStage) {
         primaryStage.setTitle("UG4 Simulation Client");
+        this.primaryStage = primaryStage;
         
         TabPane tabPane = new TabPane();
         
@@ -846,6 +849,7 @@ public class ClientApplication extends Application {
                 }
                 if (batch.length() > 0 && logArea != null) {
                     logArea.appendText(batch.toString());
+                    trimTextAreaToLastLines(logArea, 100);
                 }
             } finally {
                 logFlushScheduled = false;
@@ -858,12 +862,50 @@ public class ClientApplication extends Application {
     
     private void showAlert(String title, String content) {
         Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(title);
-            alert.setContentText(content);
-            // JPro-friendly non-blocking alert
-            alert.show();
+            try {
+                WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
+                VBox box = new VBox(10);
+                box.setPadding(new Insets(16));
+                Label titleLabel = new Label(title);
+                titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
+                Label contentLabel = new Label(content);
+                contentLabel.setWrapText(true);
+                Button closeBtn = new Button("Close");
+
+                Stage popup = new Stage();
+                popup.initOwner(primaryStage);
+                VBox root = new VBox(10, box, new HBox(10, closeBtn));
+                root.setPadding(new Insets(16));
+                box.getChildren().addAll(titleLabel, contentLabel);
+                popup.setScene(new Scene(root));
+                closeBtn.setOnAction(e -> popup.close());
+
+                if (webAPI != null) {
+                    webAPI.openStageAsPopup(popup);
+                } else {
+                    popup.show();
+                }
+            } catch (Throwable t) {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle(title);
+                alert.setContentText(content);
+                alert.show();
+            }
         });
+    }
+    
+    private void trimTextAreaToLastLines(TextArea area, int maxLines) {
+        String text = area.getText();
+        int lines = 0;
+        for (int i = text.length() - 1; i >= 0; i--) {
+            if (text.charAt(i) == '\n') {
+                lines++;
+                if (lines > maxLines) {
+                    area.deleteText(0, i);
+                    break;
+                }
+            }
+        }
     }
     
     public static void main(String[] args) {

@@ -9,6 +9,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
+import javafx.scene.Node;
 import javafx.stage.FileChooser;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
@@ -68,6 +69,7 @@ public class ClientApplication extends Application {
     });
     private long lastProgressUiUpdateMs = 0L;
     private Stage primaryStage;
+    private StackPane appRoot;
     
     @Override
     public void start(Stage primaryStage) {
@@ -83,7 +85,8 @@ public class ClientApplication extends Application {
         
         tabPane.getTabs().addAll(connectionTab, simulationTab, resultsTab, gltfServerTab);
         
-        Scene scene = new Scene(tabPane, 900, 700);
+        appRoot = new StackPane(tabPane);
+        Scene scene = new Scene(appRoot, 900, 700);
         primaryStage.setScene(scene);
         primaryStage.show();
         
@@ -429,35 +432,77 @@ public class ClientApplication extends Application {
     }
     
     private void browseForScript() {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Select Lua Script");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("Lua Scripts", "*.lua")
-        );
-        
-        File file = fileChooser.showOpenDialog(scriptPathField.getScene().getWindow());
-        if (file != null) {
-            scriptPathField.setText(file.getAbsolutePath());
+        WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
+        if (webAPI != null) {
+            TextField input = new TextField(scriptPathField.getText());
+            input.setPrefWidth(520);
+            Button ok = new Button("OK");
+            Button cancel = new Button("Cancel");
+            HBox actions = new HBox(10, cancel, ok);
+            actions.setAlignment(Pos.CENTER_RIGHT);
+            VBox card = new VBox(12, new Label("Enter script path (server path)"), input, actions);
+            card.setMaxWidth(640);
+            Runnable close = openOverlay(card);
+            ok.setOnAction(e -> { scriptPathField.setText(input.getText()); close.run(); });
+            cancel.setOnAction(e -> close.run());
+        } else {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Select Lua Script");
+            fileChooser.getExtensionFilters().add(
+                    new FileChooser.ExtensionFilter("Lua Scripts", "*.lua")
+            );
+            File file = fileChooser.showOpenDialog(scriptPathField.getScene().getWindow());
+            if (file != null) {
+                scriptPathField.setText(file.getAbsolutePath());
+            }
         }
     }
     
     private void browseForUgExecutable() {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Select UG4 Executable");
-        
-        File file = fileChooser.showOpenDialog(ugExecutableField.getScene().getWindow());
-        if (file != null) {
-            ugExecutableField.setText(file.getAbsolutePath());
+        WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
+        if (webAPI != null) {
+            TextField input = new TextField(ugExecutableField.getText());
+            input.setPrefWidth(520);
+            Button ok = new Button("OK");
+            Button cancel = new Button("Cancel");
+            HBox actions = new HBox(10, cancel, ok);
+            actions.setAlignment(Pos.CENTER_RIGHT);
+            VBox card = new VBox(12, new Label("Enter UG4 executable path (server path)"), input, actions);
+            card.setMaxWidth(640);
+            Runnable close = openOverlay(card);
+            ok.setOnAction(e -> { ugExecutableField.setText(input.getText()); close.run(); });
+            cancel.setOnAction(e -> close.run());
+        } else {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Select UG4 Executable");
+            File file = fileChooser.showOpenDialog(ugExecutableField.getScene().getWindow());
+            if (file != null) {
+                ugExecutableField.setText(file.getAbsolutePath());
+            }
         }
     }
     
     private void browseForOutputDirectory() {
-        DirectoryChooser dirChooser = new DirectoryChooser();
-        dirChooser.setTitle("Select Output Directory");
-        
-        File dir = dirChooser.showDialog(outputDirField.getScene().getWindow());
-        if (dir != null) {
-            outputDirField.setText(dir.getAbsolutePath());
+        WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
+        if (webAPI != null) {
+            TextField input = new TextField(outputDirField.getText());
+            input.setPrefWidth(520);
+            Button ok = new Button("OK");
+            Button cancel = new Button("Cancel");
+            HBox actions = new HBox(10, cancel, ok);
+            actions.setAlignment(Pos.CENTER_RIGHT);
+            VBox card = new VBox(12, new Label("Enter output directory (server path)"), input, actions);
+            card.setMaxWidth(640);
+            Runnable close = openOverlay(card);
+            ok.setOnAction(e -> { outputDirField.setText(input.getText()); close.run(); });
+            cancel.setOnAction(e -> close.run());
+        } else {
+            DirectoryChooser dirChooser = new DirectoryChooser();
+            dirChooser.setTitle("Select Output Directory");
+            File dir = dirChooser.showDialog(outputDirField.getScene().getWindow());
+            if (dir != null) {
+                outputDirField.setText(dir.getAbsolutePath());
+            }
         }
     }
     
@@ -862,36 +907,44 @@ public class ClientApplication extends Application {
     
     private void showAlert(String title, String content) {
         Platform.runLater(() -> {
-            try {
-                WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
-                VBox box = new VBox(10);
-                box.setPadding(new Insets(16));
-                Label titleLabel = new Label(title);
-                titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
-                Label contentLabel = new Label(content);
-                contentLabel.setWrapText(true);
-                Button closeBtn = new Button("Close");
+            VBox card = new VBox(12);
+            card.setPadding(new Insets(18));
+            card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+            card.setMaxWidth(640);
+            Label titleLabel = new Label(title);
+            titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 16;");
+            Label contentLabel = new Label(content);
+            contentLabel.setWrapText(true);
+            Button closeBtn = new Button("Close");
+            HBox actions = new HBox(10, closeBtn);
+            actions.setAlignment(Pos.CENTER_RIGHT);
+            card.getChildren().addAll(titleLabel, contentLabel, actions);
+            Runnable close = openOverlay(card);
+            closeBtn.setOnAction(e -> close.run());
+        });
+    }
 
-                Stage popup = new Stage();
-                popup.initOwner(primaryStage);
-                VBox root = new VBox(10, box, new HBox(10, closeBtn));
-                root.setPadding(new Insets(16));
-                box.getChildren().addAll(titleLabel, contentLabel);
-                popup.setScene(new Scene(root));
-                closeBtn.setOnAction(e -> popup.close());
-
-                if (webAPI != null) {
-                    webAPI.openStageAsPopup(popup);
-                } else {
-                    popup.show();
-                }
-            } catch (Throwable t) {
-                Alert alert = new Alert(Alert.AlertType.ERROR);
-                alert.setTitle(title);
-                alert.setContentText(content);
-                alert.show();
+    private Runnable openOverlay(Node content) {
+        if (appRoot == null) {
+            return () -> {};
+        }
+        StackPane overlay = new StackPane();
+        overlay.setPickOnBounds(true);
+        overlay.setStyle("-fx-background-color: rgba(0,0,0,0.45);");
+        StackPane.setAlignment(content, Pos.CENTER);
+        content.setOnMouseClicked(ev -> ev.consume());
+        overlay.getChildren().add(content);
+        appRoot.getChildren().add(overlay);
+        Runnable close = () -> appRoot.getChildren().remove(overlay);
+        overlay.setOnMouseClicked(e -> {
+            if (e.getTarget() == overlay) {
+                e.consume();
+                close.run();
             }
         });
+        overlay.setOnKeyPressed(e -> { if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) close.run(); });
+        overlay.requestFocus();
+        return close;
     }
     
     private void trimTextAreaToLastLines(TextArea area, int maxLines) {

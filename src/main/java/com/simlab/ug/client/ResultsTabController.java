@@ -12,6 +12,7 @@ import javafx.scene.control.*;
 import javafx.scene.Node;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.*;
+import javafx.scene.Scene;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
@@ -892,31 +893,36 @@ public class ResultsTabController {
     
     private void showAlert(String title, String content) {
         Platform.runLater(() -> {
-            try {
-                Stage owner = (Stage) root.getScene().getWindow();
-                WebAPI webAPI = WebAPI.getWebAPI(owner);
-                VBox box = new VBox(10);
-                box.setPadding(new Insets(16));
-                Label titleLabel = new Label(title);
-                titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
-                Label contentLabel = new Label(content);
-                contentLabel.setWrapText(true);
-                Button closeBtn = new Button("Close");
-
-                Stage popup = new Stage();
-                popup.initOwner(owner);
-                VBox rootBox = new VBox(10, box, new HBox(10, closeBtn));
-                rootBox.setPadding(new Insets(16));
-                box.getChildren().addAll(titleLabel, contentLabel);
-                popup.setScene(new Scene(rootBox));
-                closeBtn.setOnAction(e -> popup.close());
-
-                if (webAPI != null) {
-                    webAPI.openStageAsPopup(popup);
-                } else {
-                    popup.show();
-                }
-            } catch (Throwable t) {
+            VBox card = new VBox(12);
+            card.setPadding(new Insets(18));
+            card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+            card.setMaxWidth(640);
+            Label titleLabel = new Label(title);
+            titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 16;");
+            Label contentLabel = new Label(content);
+            contentLabel.setWrapText(true);
+            Button closeBtn = new Button("Close");
+            HBox actions = new HBox(10, closeBtn);
+            actions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+            card.getChildren().addAll(titleLabel, contentLabel, actions);
+            
+            // Overlay onto current Scene root StackPane
+            Scene scene = root.getScene();
+            if (scene != null && scene.getRoot() instanceof StackPane) {
+                StackPane appRoot = (StackPane) scene.getRoot();
+                StackPane overlay = new StackPane();
+                overlay.setPickOnBounds(true);
+                overlay.setStyle("-fx-background-color: rgba(0,0,0,0.45);");
+                StackPane.setAlignment(card, javafx.geometry.Pos.CENTER);
+                overlay.getChildren().add(card);
+                appRoot.getChildren().add(overlay);
+                closeBtn.setOnAction(e -> appRoot.getChildren().remove(overlay));
+                // Consume clicks on content
+                card.setOnMouseClicked(e -> e.consume());
+                overlay.setOnMouseClicked(e -> { if (e.getTarget() == overlay) { e.consume(); appRoot.getChildren().remove(overlay); } });
+                overlay.setOnKeyPressed(e -> { if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) appRoot.getChildren().remove(overlay); });
+                overlay.requestFocus();
+            } else {
                 Alert alert = new Alert(
                     title.equals("Error") ? Alert.AlertType.ERROR : Alert.AlertType.INFORMATION
                 );

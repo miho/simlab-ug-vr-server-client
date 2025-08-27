@@ -71,6 +71,7 @@ public class VtuFileGroup {
         conversionOptions.put("export", "scene.gltf");
         conversionOptions.put("bg", "0.08,0.09,0.10");
         conversionOptions.put("opacity", "1.0");
+        conversionOptions.put("no-preview", "true");
     }
     
     public void addFile(VtuFile file) {

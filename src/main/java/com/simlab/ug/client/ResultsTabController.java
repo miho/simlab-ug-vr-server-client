@@ -66,6 +66,27 @@ public class ResultsTabController {
     });
     private long lastStatusUiUpdateMs = 0L;
     
+    // Reusable overlay helper for this controller
+    private Runnable openOverlay(Node content) {
+        Scene scene = root.getScene();
+        if (scene != null && scene.getRoot() instanceof StackPane) {
+            StackPane appRoot = (StackPane) scene.getRoot();
+            StackPane overlay = new StackPane();
+            overlay.setPickOnBounds(true);
+            overlay.setStyle("-fx-background-color: rgba(0,0,0,0.45);");
+            StackPane.setAlignment(content, javafx.geometry.Pos.CENTER);
+            content.setOnMouseClicked(ev -> ev.consume());
+            overlay.getChildren().add(content);
+            appRoot.getChildren().add(overlay);
+            Runnable close = () -> appRoot.getChildren().remove(overlay);
+            overlay.setOnMouseClicked(e -> { if (e.getTarget() == overlay) { e.consume(); close.run(); } });
+            overlay.setOnKeyPressed(e -> { if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) close.run(); });
+            overlay.requestFocus();
+            return close;
+        }
+        return () -> {};
+    }
+    
     public VBox createResultsTab() {
         root = new VBox(10);
         root.setPadding(new Insets(10));
@@ -466,23 +487,21 @@ public class ResultsTabController {
     }
     
     private void addNewGroup() {
-        VBox box = new VBox(10);
-        box.setPadding(new Insets(16));
+        VBox card = new VBox(12);
+        card.setPadding(new Insets(18));
+        card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+        card.setMaxWidth(640);
         Label title = new Label("Add File Group");
-        title.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
+        title.setStyle("-fx-font-weight: bold; -fx-font-size: 16;");
         Label prompt = new Label("Enter file pattern for the new group");
         TextField patternField = new TextField("*sol_*.vtu");
-        HBox buttons = new HBox(10);
+        HBox actions = new HBox(10);
         Button ok = new Button("Add");
         Button cancel = new Button("Cancel");
-        buttons.getChildren().addAll(ok, cancel);
-        VBox content = new VBox(10, title, prompt, patternField, buttons);
-        content.setPadding(new Insets(16));
-        
-        Stage owner = (Stage) root.getScene().getWindow();
-        Stage popup = new Stage();
-        popup.initOwner(owner);
-        popup.setScene(new Scene(content));
+        actions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+        actions.getChildren().addAll(cancel, ok);
+        card.getChildren().addAll(title, prompt, patternField, actions);
+        Runnable close = openOverlay(card);
         ok.setOnAction(e -> {
             String pattern = patternField.getText();
             if (pattern != null && !pattern.trim().isEmpty()) {
@@ -493,20 +512,9 @@ public class ResultsTabController {
                 }
                 fileGroups.add(newGroup);
             }
-            popup.close();
+            close.run();
         });
-        cancel.setOnAction(e -> popup.close());
-        
-        try {
-            WebAPI webAPI = WebAPI.getWebAPI(owner);
-            if (webAPI != null) {
-                webAPI.openStageAsPopup(popup);
-            } else {
-                popup.show();
-            }
-        } catch (Throwable t) {
-            popup.show();
-        }
+        cancel.setOnAction(e -> close.run());
     }
     
     private void rescanGroup(VtuFileGroup group) {
@@ -538,38 +546,26 @@ public class ResultsTabController {
         if (selected != null) {
             EditGroupDialog dialog = new EditGroupDialog(selected);
             Node dlgContent = dialog.getDialogPane().getContent();
-            VBox container = new VBox(10, dlgContent);
-            container.setPadding(new Insets(16));
-            HBox buttons = new HBox(10);
+            VBox card = new VBox(12, dlgContent);
+            card.setPadding(new Insets(18));
+            card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+            card.setMaxWidth(700);
+            HBox actions = new HBox(10);
             Button save = new Button("Save");
             Button cancel = new Button("Cancel");
-            buttons.getChildren().addAll(save, cancel);
-            container.getChildren().add(buttons);
-            
-            Stage owner = (Stage) root.getScene().getWindow();
-            Stage popup = new Stage();
-            popup.initOwner(owner);
-            popup.setScene(new Scene(container));
+            actions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+            actions.getChildren().addAll(cancel, save);
+            card.getChildren().add(actions);
+            Runnable close = openOverlay(card);
             save.setOnAction(e -> {
                 ButtonType ok = ButtonType.OK;
                 dialog.getResultConverter().call(ok);
                 rescanGroup(selected);
                 groupsTable.refresh();
                 log("Updated group: " + selected.getGroupName());
-                popup.close();
+                close.run();
             });
-            cancel.setOnAction(e -> popup.close());
-            
-            try {
-                WebAPI webAPI = WebAPI.getWebAPI(owner);
-                if (webAPI != null) {
-                    webAPI.openStageAsPopup(popup);
-                } else {
-                    popup.show();
-                }
-            } catch (Throwable t) {
-                popup.show();
-            }
+            cancel.setOnAction(e -> close.run());
         }
     }
     
@@ -590,37 +586,25 @@ public class ResultsTabController {
     private void configureGroup(VtuFileGroup group) {
         VtuConversionDialog dialog = new VtuConversionDialog(group);
         Node dlgContent = dialog.getDialogPane().getContent();
-        VBox container = new VBox(10, dlgContent);
-        container.setPadding(new Insets(16));
-        HBox buttons = new HBox(10);
+        VBox card = new VBox(12, dlgContent);
+        card.setPadding(new Insets(18));
+        card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+        card.setMaxWidth(800);
+        HBox actions = new HBox(10);
         Button save = new Button("Save");
         Button cancel = new Button("Cancel");
-        buttons.getChildren().addAll(save, cancel);
-        container.getChildren().add(buttons);
-        
-        Stage owner = (Stage) root.getScene().getWindow();
-        Stage popup = new Stage();
-        popup.initOwner(owner);
-        popup.setScene(new Scene(container));
+        actions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+        actions.getChildren().addAll(cancel, save);
+        card.getChildren().add(actions);
+        Runnable close = openOverlay(card);
         save.setOnAction(e -> {
             ButtonType ok = ButtonType.OK;
             dialog.getResultConverter().call(ok);
             groupsTable.refresh();
             log("Updated conversion options for group: " + group.getGroupName());
-            popup.close();
+            close.run();
         });
-        cancel.setOnAction(e -> popup.close());
-        
-        try {
-            WebAPI webAPI = WebAPI.getWebAPI(owner);
-            if (webAPI != null) {
-                webAPI.openStageAsPopup(popup);
-            } else {
-                popup.show();
-            }
-        } catch (Throwable t) {
-            popup.show();
-        }
+        cancel.setOnAction(e -> close.run());
     }
     
     private void convertSelectedGroups() {

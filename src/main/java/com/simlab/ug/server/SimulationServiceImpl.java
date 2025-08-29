@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -31,6 +32,8 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
     
     private final Map<String, SimulationExecutor> activeSimulations = new ConcurrentHashMap<>();
     private final Map<String, String> completedSimulationDirs = new ConcurrentHashMap<>();
+    private final Map<String, ResultWatcher> activeWatchers = new ConcurrentHashMap<>();
+    private final AtomicInteger watcherCounter = new AtomicInteger(0);
     private String ugPath = "";
     private String workingDirectory = System.getProperty("user.dir");
     private final LuaScriptParser scriptParser = new LuaScriptParser();
@@ -167,6 +170,9 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                    ": " + completedExecutor.getOutputDirectory());
                     }
                     
+                    // Stop watchers for completed simulation
+                    stopWatchersForSimulation(finalSimulationId);
+                    
                     responseObserver.onNext(SimulationUpdate.newBuilder()
                             .setSimulationId(finalSimulationId)
                             .setType(UpdateType.RESULT)
@@ -183,6 +189,9 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                 
                 @Override
                 public void onError(String error, String stackTrace) {
+                    // Stop watchers for failed simulation
+                    stopWatchersForSimulation(finalSimulationId);
+                    
                     responseObserver.onNext(SimulationUpdate.newBuilder()
                             .setSimulationId(finalSimulationId)
                             .setType(UpdateType.UPDATE_ERROR)
@@ -218,6 +227,10 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         if (executor != null) {
             executor.stop();
             activeSimulations.remove(simulationId);
+            
+            // Stop and remove any watchers for this simulation
+            stopWatchersForSimulation(simulationId);
+            
             responseObserver.onNext(StatusResponse.newBuilder()
                     .setSuccess(true)
                     .setMessage("Simulation stopped: " + simulationId)
@@ -334,8 +347,11 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
             String simulationId = request.getSimulationId();
             java.util.List<String> patterns = request.getFilePatternsList();
             boolean includeExisting = request.getIncludeExisting();
+            
+            // Generate unique watcher ID for this subscription
+            String watcherId = simulationId + "_watcher_" + watcherCounter.incrementAndGet();
 
-            // Resolve output directory similar to getSimulationResults
+            // Resolve the output directory similar to getSimulationResults
             Path outputDir;
             SimulationExecutor executor = activeSimulations.get(simulationId);
             if (executor != null && executor.getOutputDirectory() != null) {
@@ -414,62 +430,34 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                 return;
             }
 
-            final WatchService ws = watchService;
-            Thread watcher = new Thread(() -> {
-                try {
-                    while (!Thread.currentThread().isInterrupted()) {
-                        WatchKey key = ws.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS);
-                        if (key == null) continue;
-                        Path dir = (Path) key.watchable();
-                        for (WatchEvent<?> event : key.pollEvents()) {
-                            if (!(event.context() instanceof Path)) continue;
-                            Path name = (Path) event.context();
-                            Path child = dir.resolve(name);
-                            if (!Files.isRegularFile(child)) continue;
-                            if (!matchesPatterns(child, patterns)) continue;
-
-                            try {
-                                boolean ready = FileWriteDetector.waitUntilReady(child);
-                                if (!ready) {
-                                    logger.info("File not ready: " + child);
-                                    System.out.println("File not ready: " + child);
-                                    continue;
-
-                                } else {
-                                    logger.info("File ready: " + child);
-                                    System.out.println("File ready: " + child);
-                                }
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-
-                            try {
-                                byte[] content = Files.readAllBytes(child);
-                                String mimeType = Files.probeContentType(child);
-                                if (mimeType == null) mimeType = "application/octet-stream";
-
-                                logger.info("!Sending file: " + child.getFileName());
-                                System.out.println("!Sending file: " + child.getFileName());
-
-                                responseObserver.onNext(FileData.newBuilder()
-                                        .setFilename(child.getFileName().toString())
-                                        .setContent(com.google.protobuf.ByteString.copyFrom(content))
-                                        .setMimeType(mimeType)
-                                        .build());
-                            } catch (IOException e) {
-                                logger.warn("Failed to read changed file: " + child, e);
-                            }
-                        }
-                        boolean valid = key.reset();
-                        if (!valid) break;
+            // Create and start watcher
+            ResultWatcher resultWatcher = new ResultWatcher(
+                    watcherId,
+                    simulationId,
+                    watchService,
+                    patterns,
+                    responseObserver
+            );
+            
+            // Store watcher reference
+            activeWatchers.put(watcherId, resultWatcher);
+            
+            // Start the watcher thread
+            resultWatcher.start();
+            
+            // Set up cleanup when client disconnects
+            io.grpc.Context.current().addListener(new io.grpc.Context.CancellationListener() {
+                @Override
+                public void cancelled(io.grpc.Context context) {
+                    logger.info("Client disconnected, stopping watcher: " + watcherId);
+                    ResultWatcher watcher = activeWatchers.remove(watcherId);
+                    if (watcher != null) {
+                        watcher.stop();
                     }
-                } catch (InterruptedException ignored) {
-                } finally {
-                    try { ws.close(); } catch (IOException ignored) {}
                 }
-            }, "SubscribeResultsWatcher");
-            watcher.setDaemon(true);
-            watcher.start();
+            }, java.util.concurrent.Executors.newSingleThreadExecutor());
+            
+            logger.info("Started watcher " + watcherId + " for simulation " + simulationId);
 
             // Note: do not call onCompleted here; keep stream open until client cancels
 
@@ -479,12 +467,12 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         }
     }
 
-    public void setResultsService(ResultsServiceImpl resultsService) {
-        this.resultsService = resultsService;
-        if (this.resultsService != null) {
-            this.resultsService.setDefaultRootDirectory(this.workingDirectory);
-        }
-    }
+//    public void setResultsService(ResultsServiceImpl resultsService) {
+//        this.resultsService = resultsService;
+//        if (this.resultsService != null) {
+//            this.resultsService.setDefaultRootDirectory(this.workingDirectory);
+//        }
+//    }
 
     public String getWorkingDirectory() {
         return workingDirectory;
@@ -524,6 +512,133 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         return java.util.Arrays.stream(e.getStackTrace())
                 .map(StackTraceElement::toString)
                 .collect(Collectors.joining("\n"));
+    }
+    
+    private void stopWatchersForSimulation(String simulationId) {
+        logger.info("Stopping all watchers for simulation: " + simulationId);
+        
+        // Find and stop all watchers for this simulation
+        activeWatchers.entrySet().removeIf(entry -> {
+            ResultWatcher watcher = entry.getValue();
+            if (watcher.getSimulationId().equals(simulationId)) {
+                logger.info("Stopping watcher: " + entry.getKey());
+                watcher.stop();
+                return true;
+            }
+            return false;
+        });
+    }
+    
+    // Inner class to manage individual result watchers
+    private static class ResultWatcher {
+        private static final Logger logger = LoggerFactory.getLogger(ResultWatcher.class);
+        private final String watcherId;
+        private final String simulationId;
+        private final WatchService watchService;
+        private final List<String> patterns;
+        private final StreamObserver<FileData> responseObserver;
+        private Thread watcherThread;
+        private volatile boolean running = false;
+        
+        public ResultWatcher(String watcherId, String simulationId, WatchService watchService,
+                           List<String> patterns, StreamObserver<FileData> responseObserver) {
+            this.watcherId = watcherId;
+            this.simulationId = simulationId;
+            this.watchService = watchService;
+            this.patterns = patterns;
+            this.responseObserver = responseObserver;
+        }
+        
+        public String getSimulationId() {
+            return simulationId;
+        }
+        
+        public void start() {
+            running = true;
+            watcherThread = new Thread(() -> {
+                try {
+                    while (running && !Thread.currentThread().isInterrupted()) {
+                        WatchKey key = watchService.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        if (key == null) continue;
+                        
+                        Path dir = (Path) key.watchable();
+                        for (WatchEvent<?> event : key.pollEvents()) {
+                            if (!running) break;
+                            if (!(event.context() instanceof Path)) continue;
+                            
+                            Path name = (Path) event.context();
+                            Path child = dir.resolve(name);
+                            
+                            if (!Files.isRegularFile(child)) continue;
+                            if (!matchesPatterns(child, patterns)) continue;
+                            
+                            try {
+                                boolean ready = FileWriteDetector.waitUntilReady(child);
+                                if (!ready) {
+                                    logger.info("File not ready: " + child);
+                                    continue;
+                                }
+                                
+                                byte[] content = Files.readAllBytes(child);
+                                String mimeType = Files.probeContentType(child);
+                                if (mimeType == null) mimeType = "application/octet-stream";
+                                
+                                logger.info("Sending file via watcher " + watcherId + ": " + child.getFileName());
+                                
+                                synchronized(responseObserver) {
+                                    responseObserver.onNext(FileData.newBuilder()
+                                            .setFilename(child.getFileName().toString())
+                                            .setContent(com.google.protobuf.ByteString.copyFrom(content))
+                                            .setMimeType(mimeType)
+                                            .build());
+                                }
+                            } catch (Exception e) {
+                                logger.warn("Failed to process file in watcher " + watcherId + ": " + child, e);
+                            }
+                        }
+                        
+                        boolean valid = key.reset();
+                        if (!valid) {
+                            logger.warn("Watch key invalid for watcher " + watcherId);
+                            break;
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    logger.info("Watcher " + watcherId + " interrupted");
+                } finally {
+                    try {
+                        watchService.close();
+                    } catch (IOException e) {
+                        logger.warn("Error closing watch service for watcher " + watcherId, e);
+                    }
+                    logger.info("Watcher " + watcherId + " stopped");
+                }
+            }, "ResultWatcher-" + watcherId);
+            
+            watcherThread.setDaemon(true);
+            watcherThread.start();
+        }
+        
+        public void stop() {
+            running = false;
+            if (watcherThread != null) {
+                watcherThread.interrupt();
+                try {
+                    watcherThread.join(1000);
+                } catch (InterruptedException e) {
+                    logger.warn("Interrupted while stopping watcher " + watcherId);
+                }
+            }
+        }
+        
+        private boolean matchesPatterns(Path path, List<String> patterns) {
+            if (patterns.isEmpty()) {
+                return true;
+            }
+            String filename = path.getFileName().toString();
+            return patterns.stream().anyMatch(pattern -> 
+                    filename.matches(pattern.replace("*", ".*")));
+        }
     }
 
 

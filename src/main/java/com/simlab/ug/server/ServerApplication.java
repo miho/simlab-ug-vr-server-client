@@ -202,8 +202,8 @@ public class ServerApplication extends Application {
             simulationService = new SimulationServiceImpl();
             simulationService.setUgPath(ugPath);
             simulationService.setInitialWorkingDirectory(workingDirField.getText());
-            resultsService = new ResultsServiceImpl(workingDirField.getText());
-            simulationService.setResultsService(resultsService);
+//            resultsService = new ResultsServiceImpl(workingDirField.getText());
+//            simulationService.setResultsService(resultsService);
             
             grpcServer = ServerBuilder.forPort(port)
                     .addService(simulationService)

@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import io.grpc.Context.CancellableContext;
 
 /**
  * Subscribes to the server for result files (e.g., VTU) and writes them into the client's output directory.
@@ -28,7 +27,7 @@ public class FileSyncManager {
     
     private static class SubscriptionInfo {
         final AtomicBoolean active = new AtomicBoolean(false);
-        CancellableContext context;
+        volatile boolean cancelled = false;
     }
 
     public FileSyncManager(SimulationClient simulationClient) {
@@ -42,25 +41,21 @@ public class FileSyncManager {
         // Create new subscription info
         SubscriptionInfo subscriptionInfo = new SubscriptionInfo();
         
-        // Check if we're replacing an existing subscription
-        SubscriptionInfo existing = activeSubscriptions.putIfAbsent(simulationId, subscriptionInfo);
-        if (existing != null) {
-            // Stop the existing subscription first
-            if (existing.context != null) {
-                existing.context.cancel(null);
-            }
-            // Use the existing object but reset it
-            subscriptionInfo = existing;
-        }
-        
         subscriptionInfo.active.set(true);
         logger.info("Starting sync for simulation: {} to directory: {}", simulationId, clientOutputDirectory);
         System.out.println("FileSyncManager: Starting sync for simulation " + simulationId);
 
         ensureDirectory(clientOutputDirectory);
+        
+        // Store the subscription info
+        activeSubscriptions.put(simulationId, subscriptionInfo);
 
         SubscriptionInfo finalSubscriptionInfo = subscriptionInfo;
-        CancellableContext context = simulationClient.subscribeResults(simulationId, filePatterns, includeExisting, fileData -> {
+        simulationClient.subscribeResults(simulationId, filePatterns, includeExisting, fileData -> {
+            // Check if this subscription was cancelled
+            if (finalSubscriptionInfo.cancelled) {
+                return;
+            }
             try {
                 writeFile(clientOutputDirectory, fileData);
             } catch (IOException e) {
@@ -73,19 +68,13 @@ public class FileSyncManager {
             // Clean up the entry when subscription ends
             activeSubscriptions.remove(simulationId);
         });
-        
-        // Store the context for later cancellation
-        subscriptionInfo.context = context;
     }
     
     public void stopSync(String simulationId) {
         SubscriptionInfo subscriptionInfo = activeSubscriptions.remove(simulationId);
         if (subscriptionInfo != null) {
             subscriptionInfo.active.set(false);
-            if (subscriptionInfo.context != null) {
-                subscriptionInfo.context.cancel(null);
-                logger.info("Cancelled subscription context for simulation: {}", simulationId);
-            }
+            subscriptionInfo.cancelled = true;
             logger.info("Stopped sync for simulation: {}", simulationId);
             System.out.println("FileSyncManager: Stopped sync for simulation " + simulationId);
         }

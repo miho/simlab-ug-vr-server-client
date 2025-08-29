@@ -170,8 +170,13 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                    ": " + completedExecutor.getOutputDirectory());
                     }
                     
-                    // Stop watchers for completed simulation
-                    stopWatchersForSimulation(finalSimulationId);
+                    // DO NOT stop watchers when simulation completes successfully
+                    // Let them continue running to transfer remaining files
+                    // Watchers will be stopped when:
+                    // 1. Client explicitly disconnects or cancels the subscription
+                    // 2. Client starts a new simulation (which stops previous sync)
+                    // 3. User manually stops the simulation
+                    logger.info("Simulation {} completed, keeping watchers active for file transfer", finalSimulationId);
                     
                     responseObserver.onNext(SimulationUpdate.newBuilder()
                             .setSimulationId(finalSimulationId)

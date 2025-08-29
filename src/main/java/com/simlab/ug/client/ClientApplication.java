@@ -294,7 +294,7 @@ public class ClientApplication extends Application {
         grid.setVgap(10);
 
         Label portLabel = new Label("Port:");
-        TextField portField = new TextField("50555");
+        TextField portField = new TextField("50056");
         portField.setPrefWidth(120);
 
         Label rootLabel = new Label("Root Directory:");

@@ -207,7 +207,7 @@ public class ServerApplication extends Application {
             
             grpcServer = ServerBuilder.forPort(port)
                     .addService(simulationService)
-                    .addService(resultsService)
+//                    .addService(resultsService)
                     .build()
                     .start();
             

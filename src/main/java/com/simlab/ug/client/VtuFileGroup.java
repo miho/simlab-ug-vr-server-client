@@ -126,6 +126,8 @@ public class VtuFileGroup {
             String modifiedExport = generateOutputFilename(baseExport, file);
             command.add("--export=" + modifiedExport);
         }
+
+        command.add("--scale-to=1.0");
         
         // Add conversion options (except export which we handle specially)
         for (Map.Entry<String, String> option : conversionOptions.entrySet()) {

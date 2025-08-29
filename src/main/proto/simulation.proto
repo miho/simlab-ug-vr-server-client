@@ -24,17 +24,17 @@ service SimulationService {
     rpc SubscribeResults(SubscribeResultsRequest) returns (stream FileData);
 }
 
-// Service for publishing GLTF results grouped with time-series semantics and live updates
-service ResultsService {
-    // List detected GLTF groups under the server's working/output directories
-    rpc ListGltfGroups(ListGltfGroupsRequest) returns (ListGltfGroupsResponse);
-
-    // Stream GLTF files for a specific group (optionally for a single time step)
-    rpc GetGroupGltfFiles(GetGroupGltfFilesRequest) returns (stream FileData);
-
-    // Subscribe to GLTF file creation/update events with grouping metadata
-    rpc SubscribeGltfFileEvents(SubscribeGltfFileEventsRequest) returns (stream GltfFileEvent);
-}
+//// Service for publishing GLTF results grouped with time-series semantics and live updates
+//service ResultsService {
+//    // List detected GLTF groups under the server's working/output directories
+//    rpc ListGltfGroups(ListGltfGroupsRequest) returns (ListGltfGroupsResponse);
+//
+//    // Stream GLTF files for a specific group (optionally for a single time step)
+//    rpc GetGroupGltfFiles(GetGroupGltfFilesRequest) returns (stream FileData);
+//
+//    // Subscribe to GLTF file creation/update events with grouping metadata
+//    rpc SubscribeGltfFileEvents(SubscribeGltfFileEventsRequest) returns (stream GltfFileEvent);
+//}
 
 message Empty {}
 

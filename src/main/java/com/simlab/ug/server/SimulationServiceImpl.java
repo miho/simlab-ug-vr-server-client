@@ -359,7 +359,10 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                         .filter(Files::isDirectory)
                         .forEach(dir -> {
                             try {
-                                dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
+                                dir.register(watchService,
+                                        StandardWatchEventKinds.ENTRY_CREATE,
+                                        StandardWatchEventKinds.ENTRY_MODIFY
+                                );
                             } catch (IOException ignored) {}
                         });
             } catch (IOException e) {
@@ -382,6 +385,12 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                             Path child = dir.resolve(name);
                             if (!Files.isRegularFile(child)) continue;
                             if (!matchesPatterns(child, patterns)) continue;
+
+                            // check whether file is ready (done being written by other program)
+                            while (Files.exists(child) && !Files.isWritable(child)) {
+                                Thread.sleep(100);
+                            }
+
                             try {
                                 byte[] content = Files.readAllBytes(child);
                                 String mimeType = Files.probeContentType(child);

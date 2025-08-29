@@ -1,0 +1,5 @@
+<!-- src/main/resources/logback.xml -->
+<configuration>
+    <root level="INFO">
+    </root>
+</configuration>

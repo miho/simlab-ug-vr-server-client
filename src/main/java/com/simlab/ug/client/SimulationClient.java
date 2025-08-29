@@ -75,16 +75,14 @@ public class SimulationClient {
         }
     }
     
-    public void runSimulation(String simulationId, String scriptPath, String ugExecutable,
-                             List<ParameterValue> parameters, String outputDirectory,
+    public void runSimulation(String simulationId, String scriptPath,
+                             List<ParameterValue> parameters,
                              SimulationListener listener) {
         
         RunSimulationRequest request = RunSimulationRequest.newBuilder()
                 .setSimulationId(simulationId)
                 .setScriptPath(scriptPath)
-                .setUgExecutable(ugExecutable)
                 .addAllParameters(parameters)
-                .setOutputDirectory(outputDirectory)
                 .build();
         
         asyncStub.runSimulation(request, new StreamObserver<SimulationUpdate>() {

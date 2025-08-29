@@ -39,7 +39,6 @@ public class ClientApplication extends Application {
     private Label connectionStatusLabel;
     
     private TextField scriptPathField;
-    private TextField ugExecutableField;
     private TextField outputDirField;
     private VBox parametersContainer;
     private Map<String, Control> parameterControls = new HashMap<>();
@@ -155,19 +154,19 @@ public class ClientApplication extends Application {
         scriptGrid.setVgap(10);
         
         Label scriptLabel = new Label("Lua Script:");
-        scriptPathField = new TextField();
+        scriptPathField = new TextField("C:\\Dev\\repos\\ug4\\apps\\Examples\\elder_adapt.lua");
         scriptPathField.setPrefWidth(400);
         Button browseScriptButton = new Button("Browse...");
         browseScriptButton.setOnAction(e -> browseForScript());
         
-        Label ugLabel = new Label("UG4 Executable:");
-        ugExecutableField = new TextField();
-        ugExecutableField.setPrefWidth(400);
-        Button browseUgButton = new Button("Browse...");
-        browseUgButton.setOnAction(e -> browseForUgExecutable());
+//        Label ugLabel = new Label("UG4 Executable:");
+//        ugExecutableField = new TextField();
+//        ugExecutableField.setPrefWidth(400);
+//        Button browseUgButton = new Button("Browse...");
+//        browseUgButton.setOnAction(e -> browseForUgExecutable());
         
         Label outputLabel = new Label("Output Directory:");
-        outputDirField = new TextField();
+        outputDirField = new TextField("C:\\Dev\\repos\\ug4\\apps\\Examples\\sol-out");
         outputDirField.setPrefWidth(400);
         Button browseOutputButton = new Button("Browse...");
         browseOutputButton.setOnAction(e -> browseForOutputDirectory());
@@ -179,9 +178,9 @@ public class ClientApplication extends Application {
         scriptGrid.add(scriptPathField, 1, 0);
         scriptGrid.add(browseScriptButton, 2, 0);
         
-        scriptGrid.add(ugLabel, 0, 1);
-        scriptGrid.add(ugExecutableField, 1, 1);
-        scriptGrid.add(browseUgButton, 2, 1);
+//        scriptGrid.add(ugLabel, 0, 1);
+//        scriptGrid.add(ugExecutableField, 1, 1);
+//        scriptGrid.add(browseUgButton, 2, 1);
         
         scriptGrid.add(outputLabel, 0, 2);
         scriptGrid.add(outputDirField, 1, 2);
@@ -412,7 +411,7 @@ public class ClientApplication extends Application {
                     connectButton.setStyle("-fx-background-color: #f44336; -fx-text-fill: white;");
                     serverHostField.setDisable(true);
                     serverPortField.setDisable(true);
-                    ugExecutableField.setText(status.getUgPath());
+//                    ugExecutableField.setText(status.getUgPath());
                     log("Connected to server at " + host + ":" + port);
                 });
             } else {
@@ -458,29 +457,29 @@ public class ClientApplication extends Application {
         }
     }
     
-    private void browseForUgExecutable() {
-        WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
-        if (webAPI != null) {
-            TextField input = new TextField(ugExecutableField.getText());
-            input.setPrefWidth(520);
-            Button ok = new Button("OK");
-            Button cancel = new Button("Cancel");
-            HBox actions = new HBox(10, cancel, ok);
-            actions.setAlignment(Pos.CENTER_RIGHT);
-            VBox card = new VBox(12, new Label("Enter UG4 executable path (server path)"), input, actions);
-            card.setMaxWidth(640);
-            Runnable close = openOverlay(card);
-            ok.setOnAction(e -> { ugExecutableField.setText(input.getText()); close.run(); });
-            cancel.setOnAction(e -> close.run());
-        } else {
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("Select UG4 Executable");
-            File file = fileChooser.showOpenDialog(ugExecutableField.getScene().getWindow());
-            if (file != null) {
-                ugExecutableField.setText(file.getAbsolutePath());
-            }
-        }
-    }
+//    private void browseForUgExecutable() {
+//        WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
+//        if (webAPI != null) {
+////            TextField input = new TextField(ugExecutableField.getText());
+//            input.setPrefWidth(520);
+//            Button ok = new Button("OK");
+//            Button cancel = new Button("Cancel");
+//            HBox actions = new HBox(10, cancel, ok);
+//            actions.setAlignment(Pos.CENTER_RIGHT);
+////            VBox card = new VBox(12, new Label("Enter UG4 executable path (server path)"), input, actions);
+//            card.setMaxWidth(640);
+//            Runnable close = openOverlay(card);
+////            ok.setOnAction(e -> { ugExecutableField.setText(input.getText()); close.run(); });
+//            cancel.setOnAction(e -> close.run());
+//        } else {
+//            FileChooser fileChooser = new FileChooser();
+//            fileChooser.setTitle("Select UG4 Executable");
+//            File file = fileChooser.showOpenDialog(ugExecutableField.getScene().getWindow());
+//            if (file != null) {
+//                ugExecutableField.setText(file.getAbsolutePath());
+//            }
+//        }
+//    }
     
     private void browseForOutputDirectory() {
         WebAPI webAPI = WebAPI.getWebAPI(primaryStage);
@@ -652,11 +651,11 @@ public class ClientApplication extends Application {
         
         currentSimulationId = UUID.randomUUID().toString();
         String scriptPath = scriptPathField.getText();
-        String ugExecutable = ugExecutableField.getText();
+//        String ugExecutable = ugExecutableField.getText();
         String outputDir = outputDirField.getText();
         
-        if (scriptPath.isEmpty() || ugExecutable.isEmpty()) {
-            showAlert("Error", "Please provide script path and UG executable");
+        if (scriptPath.isEmpty()) {
+            showAlert("Error", "Please provide script path");
             return;
         }
         
@@ -670,7 +669,7 @@ public class ClientApplication extends Application {
             logArea.clear();
         });
         
-        client.runSimulation(currentSimulationId, scriptPath, ugExecutable, parameters, outputDir,
+        client.runSimulation(currentSimulationId, scriptPath, parameters,
                 new SimulationClient.SimulationListener() {
                     @Override
                     public void onProgress(double percentage, String message, int current, int total) {
@@ -730,10 +729,13 @@ public class ClientApplication extends Application {
                 });
 
         // Start VTU file sync to client output directory (initial + live updates)
-        if (fileSyncManager == null && client != null) {
+        if (fileSyncManager == null) {
             fileSyncManager = new FileSyncManager(client);
         }
-        if (fileSyncManager != null && outputDir != null && !outputDir.isEmpty()) {
+
+        if (outputDir != null) {
+            System.out.println("Output directory: " + outputDir);
+            System.out.println("Starting VTU file sync for simulation ID: " + currentSimulationId);
             fileSyncManager.startSync(currentSimulationId, java.util.Arrays.asList("*.vtu"), true, outputDir);
         }
     }

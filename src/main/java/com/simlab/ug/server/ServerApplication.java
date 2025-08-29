@@ -91,7 +91,7 @@ public class ServerApplication extends Application {
         
         // UG4 Path configuration
         Label ugLabel = new Label("UG4 Executable:");
-        ugPathField = new TextField();
+        ugPathField = new TextField("C:\\Dev\\repos\\ug4\\bin\\ugshell.exe");
         ugPathField.setPrefWidth(300);
         Button browseUgButton = new Button("Browse...");
         browseUgButton.setOnAction(e -> browseForUgExecutable());

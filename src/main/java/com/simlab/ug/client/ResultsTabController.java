@@ -16,6 +16,7 @@ import javafx.scene.Scene;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.geometry.Pos;
 import com.jpro.webapi.WebAPI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -352,27 +353,75 @@ public class ResultsTabController {
     }
     
     private void browseForOutputDirectory() {
-        DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("Select Output Directory");
-        
-        File dir = chooser.showDialog(root.getScene().getWindow());
-        if (dir != null) {
-            outputDirField.setText(dir.getAbsolutePath());
-            currentOutputDirectory = dir.toPath();
+        Stage stage = (Stage) root.getScene().getWindow();
+        WebAPI webAPI = WebAPI.getWebAPI(stage);
+        if (webAPI != null) {
+            // JPro mode - use web workaround
+            TextField input = new TextField(outputDirField.getText());
+            input.setPrefWidth(520);
+            Button ok = new Button("OK");
+            Button cancel = new Button("Cancel");
+            HBox actions = new HBox(10, cancel, ok);
+            actions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+            VBox card = new VBox(12, new Label("Enter output directory path"), input, actions);
+            card.setMaxWidth(640);
+            card.setPadding(new Insets(18));
+            card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+            Runnable close = openOverlay(card);
+            ok.setOnAction(e -> { 
+                outputDirField.setText(input.getText());
+                currentOutputDirectory = Paths.get(input.getText());
+                close.run(); 
+            });
+            cancel.setOnAction(e -> close.run());
+        } else {
+            // Native JavaFX mode - use native dialog
+            DirectoryChooser chooser = new DirectoryChooser();
+            chooser.setTitle("Select Output Directory");
+            
+            File dir = chooser.showDialog(root.getScene().getWindow());
+            if (dir != null) {
+                outputDirField.setText(dir.getAbsolutePath());
+                currentOutputDirectory = dir.toPath();
+            }
         }
     }
     
     private void browseForVtu2gltf() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("Select vtu2gltf Executable");
-        chooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Executable", "*", "*")
-        );
-        
-        File file = chooser.showOpenDialog(root.getScene().getWindow());
-        if (file != null) {
-            vtu2gltfPathField.setText(file.getAbsolutePath());
-            vtu2gltfExecutable = file.getAbsolutePath();
+        Stage stage = (Stage) root.getScene().getWindow();
+        WebAPI webAPI = WebAPI.getWebAPI(stage);
+        if (webAPI != null) {
+            // JPro mode - use web workaround
+            TextField input = new TextField(vtu2gltfPathField.getText());
+            input.setPrefWidth(520);
+            Button ok = new Button("OK");
+            Button cancel = new Button("Cancel");
+            HBox actions = new HBox(10, cancel, ok);
+            actions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+            VBox card = new VBox(12, new Label("Enter vtu2gltf executable path"), input, actions);
+            card.setMaxWidth(640);
+            card.setPadding(new Insets(18));
+            card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+            Runnable close = openOverlay(card);
+            ok.setOnAction(e -> { 
+                vtu2gltfPathField.setText(input.getText());
+                vtu2gltfExecutable = input.getText();
+                close.run(); 
+            });
+            cancel.setOnAction(e -> close.run());
+        } else {
+            // Native JavaFX mode - use native dialog
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Select vtu2gltf Executable");
+            chooser.getExtensionFilters().addAll(
+                    new FileChooser.ExtensionFilter("Executable", "*", "*")
+            );
+            
+            File file = chooser.showOpenDialog(root.getScene().getWindow());
+            if (file != null) {
+                vtu2gltfPathField.setText(file.getAbsolutePath());
+                vtu2gltfExecutable = file.getAbsolutePath();
+            }
         }
     }
     

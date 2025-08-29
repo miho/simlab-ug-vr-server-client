@@ -4,6 +4,10 @@ import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+import com.jpro.webapi.WebAPI;
+import javafx.scene.Node;
+import javafx.geometry.Pos;
 import java.io.File;
 import java.util.Map;
 
@@ -244,18 +248,63 @@ public class VtuConversionDialog extends Dialog<Map<String, String>> {
     }
     
     private void browseForExportPath() {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Select Export Path");
-        fileChooser.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("GLTF Files", "*.gltf"),
-            new FileChooser.ExtensionFilter("GLB Files", "*.glb")
-        );
-        fileChooser.setInitialFileName(fileGroup.getGroupName() + ".gltf");
-        
-        File file = fileChooser.showSaveDialog(getDialogPane().getScene().getWindow());
-        if (file != null) {
-            exportField.setText(file.getAbsolutePath());
+        Stage stage = (Stage) getDialogPane().getScene().getWindow();
+        WebAPI webAPI = WebAPI.getWebAPI(stage);
+        if (webAPI != null) {
+            // JPro mode - use web workaround
+            TextField input = new TextField(exportField.getText().isEmpty() ? 
+                fileGroup.getGroupName() + ".gltf" : exportField.getText());
+            input.setPrefWidth(520);
+            Button ok = new Button("OK");
+            Button cancel = new Button("Cancel");
+            HBox actions = new HBox(10, cancel, ok);
+            actions.setAlignment(Pos.CENTER_RIGHT);
+            VBox card = new VBox(12, new Label("Enter export file path (.gltf or .glb)"), input, actions);
+            card.setMaxWidth(640);
+            card.setPadding(new Insets(18));
+            card.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 24,0,0,8);");
+            Runnable close = openOverlay(card);
+            ok.setOnAction(e -> { 
+                exportField.setText(input.getText());
+                close.run(); 
+            });
+            cancel.setOnAction(e -> close.run());
+        } else {
+            // Native JavaFX mode - use native dialog
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Select Export Path");
+            fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("GLTF Files", "*.gltf"),
+                new FileChooser.ExtensionFilter("GLB Files", "*.glb")
+            );
+            fileChooser.setInitialFileName(fileGroup.getGroupName() + ".gltf");
+            
+            File file = fileChooser.showSaveDialog(getDialogPane().getScene().getWindow());
+            if (file != null) {
+                exportField.setText(file.getAbsolutePath());
+            }
         }
+    }
+    
+    // Helper method for overlay in JPro mode
+    private Runnable openOverlay(Node content) {
+        javafx.scene.Scene scene = getDialogPane().getScene();
+        if (scene != null && scene.getRoot() instanceof StackPane) {
+            StackPane appRoot = (StackPane) scene.getRoot();
+            StackPane overlay = new StackPane();
+            overlay.setPickOnBounds(true);
+            overlay.setStyle("-fx-background-color: rgba(0,0,0,0.45);");
+            StackPane.setAlignment(content, Pos.CENTER);
+            content.setOnMouseClicked(ev -> ev.consume());
+            overlay.getChildren().add(content);
+            appRoot.getChildren().add(overlay);
+            Runnable close = () -> appRoot.getChildren().remove(overlay);
+            overlay.setOnMouseClicked(e -> { if (e.getTarget() == overlay) { e.consume(); close.run(); } });
+            overlay.setOnKeyPressed(e -> { if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) close.run(); });
+            overlay.requestFocus();
+            return close;
+        }
+        return () -> {};
     }
     
     private void loadCurrentOptions() {

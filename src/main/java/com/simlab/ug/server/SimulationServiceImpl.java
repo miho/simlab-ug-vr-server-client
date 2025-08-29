@@ -37,7 +37,6 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
     private String ugPath = "";
     private String workingDirectory = System.getProperty("user.dir");
     private final LuaScriptParser scriptParser = new LuaScriptParser();
-    private ResultsServiceImpl resultsService;
     
     @Override
     public void getServerStatus(Empty request, StreamObserver<ServerStatus> responseObserver) {
@@ -73,12 +72,7 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         File dir = new File(request.getDirectory());
         if (dir.exists() && dir.isDirectory()) {
             workingDirectory = request.getDirectory();
-            // Keep ResultsService root directory in sync
-            if (resultsService != null) {
-                try {
-                    resultsService.setDefaultRootDirectory(workingDirectory);
-                } catch (Exception ignored) {}
-            }
+
             responseObserver.onNext(StatusResponse.newBuilder()
                     .setSuccess(true)
                     .setMessage("Working directory set to: " + workingDirectory)
@@ -534,13 +528,6 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         }
     }
 
-//    public void setResultsService(ResultsServiceImpl resultsService) {
-//        this.resultsService = resultsService;
-//        if (this.resultsService != null) {
-//            this.resultsService.setDefaultRootDirectory(this.workingDirectory);
-//        }
-//    }
-
     public String getWorkingDirectory() {
         return workingDirectory;
     }
@@ -548,9 +535,6 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
     public void setInitialWorkingDirectory(String workingDirectory) {
         if (workingDirectory != null && !workingDirectory.isEmpty()) {
             this.workingDirectory = workingDirectory;
-            if (resultsService != null) {
-                resultsService.setDefaultRootDirectory(workingDirectory);
-            }
         }
     }
     

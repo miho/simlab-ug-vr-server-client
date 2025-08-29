@@ -561,8 +561,8 @@ public class ClientApplication extends Application {
                     
                     // Checkbox to enable/disable this parameter
                     CheckBox enableCheckbox = new CheckBox();
-                    enableCheckbox.setSelected(true);
-                    enableCheckbox.setTooltip(new Tooltip("Uncheck to omit this parameter"));
+                    enableCheckbox.setSelected(false); // Default to deselected
+                    enableCheckbox.setTooltip(new Tooltip("Check to include this parameter"));
                     parameterEnabledCheckboxes.put(param.getName(), enableCheckbox);
                     
                     Label label = new Label(param.getName() + ":");
@@ -602,7 +602,7 @@ public class ClientApplication extends Application {
                         parameterEnabledCheckboxes.values().forEach(cb -> cb.setSelected(false));
                     });
                     
-                    Label helpLabel = new Label("Tip: Uncheck parameters to omit them from the command");
+                    Label helpLabel = new Label("Tip: Check parameters to include them in the command");
                     helpLabel.setStyle("-fx-font-style: italic; -fx-font-size: 11; -fx-text-fill: #666;");
                     
                     controlBox.getChildren().addAll(selectAllBtn, deselectAllBtn, helpLabel);

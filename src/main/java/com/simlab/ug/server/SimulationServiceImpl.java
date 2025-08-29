@@ -369,6 +369,19 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
             // Resolve the output directory similar to getSimulationResults
             Path outputDir;
             SimulationExecutor executor = activeSimulations.get(simulationId);
+            
+            // Wait a short time for executor to be available if it's not found immediately
+            // This handles the race condition where subscribeResults is called before executor is registered
+            if (executor == null) {
+                logger.info("Executor not found immediately for simulation {}, waiting briefly...", simulationId);
+                try {
+                    Thread.sleep(100); // Wait 100ms
+                    executor = activeSimulations.get(simulationId);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
             if (executor != null && executor.getOutputDirectory() != null) {
                 File outDir = new File(executor.getOutputDirectory());
                 if (!outDir.isAbsolute()) {
@@ -385,9 +398,12 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                 outputDir = outDir.toPath();
                 logger.info("Using completed simulation output directory for watcher: {}", outputDir);
             } else {
-                // Fallback - this might be too early, directory might not exist yet
-                outputDir = Paths.get(workingDirectory, "output", simulationId);
-                logger.info("Using fallback output directory for watcher: {}", outputDir);
+                outputDir = null;
+                // If we still can't find the executor, we can't proceed
+                logger.error("Cannot find output directory for simulation: {}", simulationId);
+                responseObserver.onError(new IllegalStateException(
+                    "Simulation " + simulationId + " not found or not yet initialized. Please try again."));
+                return;
             }
 
             // Create directory if it doesn't exist yet (for new simulations)
@@ -414,7 +430,8 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                     try {
                                         FileWriteDetector.waitUntilReady(path);
                                     } catch (IOException | InterruptedException e) {
-                                        throw new RuntimeException(e);
+//                                        throw new RuntimeException(e);
+                                        logger.warn("Error waiting for file to be ready: " + path, e);
                                     }
 
                                     byte[] content = Files.readAllBytes(path);
@@ -613,8 +630,10 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                             StandardWatchEventKinds.ENTRY_CREATE,
                                             StandardWatchEventKinds.ENTRY_MODIFY);
                                     logger.info("Dynamically registered new subdirectory: {}", child);
+                                    System.out.println("Server: Dynamically registered new subdirectory: " + child);
                                 } catch (IOException e) {
                                     logger.warn("Failed to register new subdirectory: {}", child, e);
+                                    System.err.println("Server: Failed to register new subdirectory: " + child);
                                 }
                                 continue;
                             }
@@ -634,6 +653,7 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                 if (mimeType == null) mimeType = "application/octet-stream";
                                 
                                 logger.info("Sending file via watcher " + watcherId + ": " + child.getFileName());
+                                System.out.println("Server: Sending file via watcher " + watcherId + ": " + child.getFileName());
                                 
                                 synchronized(responseObserver) {
                                     responseObserver.onNext(FileData.newBuilder()
@@ -644,24 +664,29 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                 }
                             } catch (Exception e) {
                                 logger.warn("Failed to process file in watcher " + watcherId + ": " + child, e);
+                                System.out.println("Server: Failed to process file in watcher " + watcherId + ": " + child);
                             }
                         }
                         
                         boolean valid = key.reset();
                         if (!valid) {
                             logger.warn("Watch key invalid for watcher " + watcherId);
+                            System.err.println("Watch key invalid for watcher " + watcherId);
                             break;
                         }
                     }
                 } catch (InterruptedException e) {
                     logger.info("Watcher " + watcherId + " interrupted");
+                    System.err.println("Server: Watcher " + watcherId + " interrupted");
                 } finally {
                     try {
                         watchService.close();
                     } catch (IOException e) {
                         logger.warn("Error closing watch service for watcher " + watcherId, e);
+                        System.err.println("Server: Error closing watch service for watcher " + watcherId);
                     }
                     logger.info("Watcher " + watcherId + " stopped");
+                    System.out.println("Server: Watcher " + watcherId + " stopped");
                 }
             }, "ResultWatcher-" + watcherId);
             
@@ -677,6 +702,7 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                     watcherThread.join(1000);
                 } catch (InterruptedException e) {
                     logger.warn("Interrupted while stopping watcher " + watcherId);
+                    System.out.println("Server: Interrupted while stopping watcher " + watcherId);
                 }
             }
         }

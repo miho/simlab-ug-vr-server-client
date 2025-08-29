@@ -642,13 +642,19 @@ public class ClientApplication extends Application {
                 return new TextField();
         }
     }
+
+    private String previousSimulationId;
     
     private void runSimulation() {
         if (client == null || !client.isConnected()) {
             showAlert("Error", "Not connected to server");
             return;
         }
-        
+
+        if (currentSimulationId!=null && !currentSimulationId.isEmpty()) {
+            previousSimulationId = currentSimulationId;
+        }
+
         currentSimulationId = UUID.randomUUID().toString();
         String scriptPath = scriptPathField.getText();
 //        String ugExecutable = ugExecutableField.getText();
@@ -732,7 +738,12 @@ public class ClientApplication extends Application {
                     }
                 });
 
-        // Start VTU file sync to client output directory (initial + live updates)
+        // Stop previous sync if exists
+        if (fileSyncManager != null && previousSimulationId != null && !previousSimulationId.isEmpty()) {
+            fileSyncManager.stopSync(previousSimulationId);
+        }
+        
+        // Create FileSyncManager only if it doesn't exist
         if (fileSyncManager == null) {
             fileSyncManager = new FileSyncManager(client);
         }
@@ -740,6 +751,8 @@ public class ClientApplication extends Application {
         if (outputDir != null) {
             System.out.println("Output directory: " + outputDir);
             System.out.println("Starting VTU file sync for simulation ID: " + currentSimulationId);
+            // The FileSyncManager.startSync already stops any previous sync for the same simulation
+            // and for different simulations we stopped it above
             fileSyncManager.startSync(currentSimulationId, java.util.Arrays.asList("*.vtu"), true, outputDir);
         }
     }

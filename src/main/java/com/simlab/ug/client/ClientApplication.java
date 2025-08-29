@@ -91,6 +91,16 @@ public class ClientApplication extends Application {
         
         // Shutdown hook
         primaryStage.setOnCloseRequest(event -> {
+            // Clean up file sync
+            if (fileSyncManager != null) {
+                if (currentSimulationId != null) {
+                    fileSyncManager.stopSync(currentSimulationId);
+                }
+                if (previousSimulationId != null) {
+                    fileSyncManager.stopSync(previousSimulationId);
+                }
+            }
+            
             if (client != null) {
                 client.shutdown();
             }
@@ -377,8 +387,27 @@ public class ClientApplication extends Application {
         // Check if we're currently connected (disconnect functionality)
         if (client != null && client.isConnected()) {
             // Disconnect
+            
+            // Stop any active file sync first
+            if (fileSyncManager != null) {
+                if (currentSimulationId != null) {
+                    fileSyncManager.stopSync(currentSimulationId);
+                }
+                if (previousSimulationId != null) {
+                    fileSyncManager.stopSync(previousSimulationId);
+                }
+            }
+            
             client.shutdown();
             client = null;
+            
+            // Reset simulation IDs
+            currentSimulationId = null;
+            previousSimulationId = null;
+            
+            // Reset FileSyncManager to ensure clean state on reconnect
+            fileSyncManager = null;
+            
             Platform.runLater(() -> {
                 connectionStatusLabel.setText("Status: Disconnected");
                 connectionStatusLabel.setTextFill(Color.RED);
@@ -651,7 +680,14 @@ public class ClientApplication extends Application {
             return;
         }
 
-        if (currentSimulationId!=null && !currentSimulationId.isEmpty()) {
+        // Stop previous simulation's file sync BEFORE updating IDs
+        if (fileSyncManager != null && currentSimulationId != null) {
+            log("Stopping file sync for previous simulation: " + currentSimulationId);
+            fileSyncManager.stopSync(currentSimulationId);
+        }
+
+        // Update simulation IDs
+        if (currentSimulationId != null && !currentSimulationId.isEmpty()) {
             previousSimulationId = currentSimulationId;
         }
 
@@ -737,11 +773,6 @@ public class ClientApplication extends Application {
                         });
                     }
                 });
-
-        // Stop previous sync if exists
-        if (fileSyncManager != null && previousSimulationId != null && !previousSimulationId.isEmpty()) {
-            fileSyncManager.stopSync(previousSimulationId);
-        }
         
         // Create FileSyncManager only if it doesn't exist
         if (fileSyncManager == null) {

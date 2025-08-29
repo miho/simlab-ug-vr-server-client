@@ -55,6 +55,14 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                     .build());
         });
         
+        // Log active watchers for debugging
+        logger.info("Server has {} active watchers", activeWatchers.size());
+        if (!activeWatchers.isEmpty()) {
+            activeWatchers.forEach((id, watcher) -> {
+                logger.debug("  - Watcher {}: watching simulation {}", id, watcher.getSimulationId());
+            });
+        }
+        
         responseObserver.onNext(status.build());
         responseObserver.onCompleted();
     }
@@ -363,6 +371,10 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
             java.util.List<String> patterns = request.getFilePatternsList();
             boolean includeExisting = request.getIncludeExisting();
             
+            // Stop any existing watchers for this simulation first
+            // This handles the case where a client reconnects and tries to watch the same simulation
+            stopWatchersForSimulation(simulationId);
+            
             // Generate unique watcher ID for this subscription
             String watcherId = simulationId + "_watcher_" + watcherCounter.incrementAndGet();
 
@@ -502,7 +514,8 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
             io.grpc.Context.current().addListener(new io.grpc.Context.CancellationListener() {
                 @Override
                 public void cancelled(io.grpc.Context context) {
-                    logger.info("Client disconnected, stopping watcher: " + watcherId);
+                    logger.info("Client disconnected or subscription cancelled, stopping watcher: " + watcherId);
+                    System.out.println("Server: Client disconnected, stopping watcher: " + watcherId);
                     ResultWatcher watcher = activeWatchers.remove(watcherId);
                     if (watcher != null) {
                         watcher.stop();
@@ -570,17 +583,29 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
     
     private void stopWatchersForSimulation(String simulationId) {
         logger.info("Stopping all watchers for simulation: " + simulationId);
+        System.out.println("Server: Stopping all watchers for simulation: " + simulationId);
         
         // Find and stop all watchers for this simulation
         activeWatchers.entrySet().removeIf(entry -> {
             ResultWatcher watcher = entry.getValue();
             if (watcher.getSimulationId().equals(simulationId)) {
                 logger.info("Stopping watcher: " + entry.getKey());
+                System.out.println("Server: Stopping watcher: " + entry.getKey());
                 watcher.stop();
                 return true;
             }
             return false;
         });
+    }
+    
+    // Method to clean up all watchers (useful for shutdown)
+    public void stopAllWatchers() {
+        logger.info("Stopping all {} active watchers", activeWatchers.size());
+        activeWatchers.forEach((id, watcher) -> {
+            logger.info("Stopping watcher: {}", id);
+            watcher.stop();
+        });
+        activeWatchers.clear();
     }
     
     // Inner class to manage individual result watchers
@@ -695,14 +720,31 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
         }
         
         public void stop() {
+            if (!running) {
+                logger.debug("Watcher {} already stopped", watcherId);
+                return;
+            }
+            
             running = false;
+            logger.info("Stopping watcher {}", watcherId);
+            
+            // Close the watch service first to interrupt the polling
+            try {
+                watchService.close();
+            } catch (IOException e) {
+                logger.warn("Error closing watch service for watcher {}", watcherId, e);
+            }
+            
             if (watcherThread != null) {
                 watcherThread.interrupt();
                 try {
-                    watcherThread.join(1000);
+                    watcherThread.join(2000); // Give it 2 seconds to stop
+                    if (watcherThread.isAlive()) {
+                        logger.warn("Watcher thread {} did not stop gracefully", watcherId);
+                    }
                 } catch (InterruptedException e) {
-                    logger.warn("Interrupted while stopping watcher " + watcherId);
-                    System.out.println("Server: Interrupted while stopping watcher " + watcherId);
+                    Thread.currentThread().interrupt();
+                    logger.warn("Interrupted while stopping watcher {}", watcherId);
                 }
             }
         }

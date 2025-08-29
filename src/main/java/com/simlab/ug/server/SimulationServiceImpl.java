@@ -375,7 +375,6 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                                         throw new RuntimeException(e);
                                     }
 
-
                                     byte[] content = Files.readAllBytes(path);
                                     String mimeType = Files.probeContentType(path);
                                     if (mimeType == null) mimeType = "application/octet-stream";
@@ -649,7 +648,7 @@ final class FileWriteDetector {
 
     /** Convenience overload with sensible defaults: quietFor=2s, timeout=2min, poll=200ms */
     public static boolean waitUntilReady(Path file) throws IOException, InterruptedException {
-        return waitUntilReady(file, Duration.ofSeconds(2), Duration.ofMinutes(2), Duration.ofMillis(200));
+        return waitUntilReady(file, Duration.ofMillis(100), Duration.ofMinutes(2), Duration.ofMillis(10));
     }
 
     // ---- internals ---------------------------------------------------------------------------

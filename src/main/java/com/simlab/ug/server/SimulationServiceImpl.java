@@ -236,10 +236,20 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                     .setMessage("Simulation stopped: " + simulationId)
                     .build());
         } else {
-            responseObserver.onNext(StatusResponse.newBuilder()
-                    .setSuccess(false)
-                    .setMessage("Simulation not found: " + simulationId)
-                    .build());
+            // Check if simulation already completed
+            if (completedSimulationDirs.containsKey(simulationId)) {
+                // Simulation already completed, stop any remaining watchers
+                stopWatchersForSimulation(simulationId);
+                responseObserver.onNext(StatusResponse.newBuilder()
+                        .setSuccess(true)
+                        .setMessage("Simulation already completed: " + simulationId)
+                        .build());
+            } else {
+                responseObserver.onNext(StatusResponse.newBuilder()
+                        .setSuccess(false)
+                        .setMessage("Simulation not found: " + simulationId)
+                        .build());
+            }
         }
         responseObserver.onCompleted();
     }
@@ -360,6 +370,7 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                     outDir = new File(workingDirectory, executor.getOutputDirectory());
                 }
                 outputDir = outDir.toPath();
+                logger.info("Using active executor output directory for watcher: {}", outputDir);
             } else if (completedSimulationDirs.containsKey(simulationId)) {
                 String completedDir = completedSimulationDirs.get(simulationId);
                 File outDir = new File(completedDir);
@@ -367,13 +378,23 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                     outDir = new File(workingDirectory, completedDir);
                 }
                 outputDir = outDir.toPath();
+                logger.info("Using completed simulation output directory for watcher: {}", outputDir);
             } else {
-                outputDir = Paths.get(workingDirectory);
+                // Fallback - this might be too early, directory might not exist yet
+                outputDir = Paths.get(workingDirectory, "output", simulationId);
+                logger.info("Using fallback output directory for watcher: {}", outputDir);
             }
 
+            // Create directory if it doesn't exist yet (for new simulations)
             if (!Files.exists(outputDir)) {
-                responseObserver.onCompleted();
-                return;
+                try {
+                    Files.createDirectories(outputDir);
+                    logger.info("Created output directory for watcher: {}", outputDir);
+                } catch (IOException e) {
+                    logger.error("Failed to create output directory: {}", outputDir, e);
+                    responseObserver.onError(e);
+                    return;
+                }
             }
 
             // Optionally send existing files first
@@ -413,18 +434,28 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
             WatchService watchService = FileSystems.getDefault().newWatchService();
             // Register directories recursively
             try {
+                // Always register the main output directory
+                outputDir.register(watchService,
+                        StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_MODIFY);
+                logger.info("Registered watch service for directory: {}", outputDir);
+                
+                // Also register any subdirectories that already exist
                 Files.walk(outputDir)
                         .filter(Files::isDirectory)
+                        .filter(dir -> !dir.equals(outputDir)) // Skip the root, already registered
                         .forEach(dir -> {
                             try {
                                 dir.register(watchService,
                                         StandardWatchEventKinds.ENTRY_CREATE,
-                                        StandardWatchEventKinds.ENTRY_MODIFY
-                                );
-                            } catch (IOException ignored) {}
+                                        StandardWatchEventKinds.ENTRY_MODIFY);
+                                logger.debug("Registered subdirectory: {}", dir);
+                            } catch (IOException e) {
+                                logger.warn("Failed to register subdirectory: {}", dir, e);
+                            }
                         });
             } catch (IOException e) {
-                logger.error("Failed to register watch service", e);
+                logger.error("Failed to register watch service for directory: {}", outputDir, e);
                 responseObserver.onError(e);
                 try { watchService.close(); } catch (IOException ignored) {}
                 return;
@@ -457,7 +488,8 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                 }
             }, java.util.concurrent.Executors.newSingleThreadExecutor());
             
-            logger.info("Started watcher " + watcherId + " for simulation " + simulationId);
+            logger.info("Started watcher {} for simulation {} watching directory: {}", watcherId, simulationId, outputDir);
+            System.out.println("Server: Started watcher " + watcherId + " for simulation " + simulationId + " watching: " + outputDir);
 
             // Note: do not call onCompleted here; keep stream open until client cancels
 
@@ -568,6 +600,19 @@ public class SimulationServiceImpl extends SimulationServiceGrpc.SimulationServi
                             
                             Path name = (Path) event.context();
                             Path child = dir.resolve(name);
+                            
+                            // If a new directory is created, register it for watching
+                            if (Files.isDirectory(child)) {
+                                try {
+                                    child.register(watchService,
+                                            StandardWatchEventKinds.ENTRY_CREATE,
+                                            StandardWatchEventKinds.ENTRY_MODIFY);
+                                    logger.info("Dynamically registered new subdirectory: {}", child);
+                                } catch (IOException e) {
+                                    logger.warn("Failed to register new subdirectory: {}", child, e);
+                                }
+                                continue;
+                            }
                             
                             if (!Files.isRegularFile(child)) continue;
                             if (!matchesPatterns(child, patterns)) continue;

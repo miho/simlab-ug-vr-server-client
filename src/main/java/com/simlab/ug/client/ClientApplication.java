@@ -720,6 +720,10 @@ public class ClientApplication extends Application {
                     
                     @Override
                     public void onComplete() {
+                        // DO NOT stop file sync when simulation completes normally
+                        // Let it continue to transfer any remaining files
+                        // The sync will be stopped when starting a new simulation or manually stopping
+                        
                         Platform.runLater(() -> {
                             runButton.setDisable(false);
                             stopButton.setDisable(true);
@@ -805,6 +809,11 @@ public class ClientApplication extends Application {
     
     private void stopSimulation() {
         if (client != null && currentSimulationId != null) {
+            // Stop file sync for this simulation
+            if (fileSyncManager != null) {
+                fileSyncManager.stopSync(currentSimulationId);
+            }
+            
             CompletableFuture
                 .supplyAsync(() -> client.stopSimulation(currentSimulationId))
                 .thenAccept(success -> Platform.runLater(() -> {

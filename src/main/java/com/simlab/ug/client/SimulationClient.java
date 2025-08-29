@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import io.grpc.Context;
+import io.grpc.Context.CancellableContext;
 
 public class SimulationClient {
     private static final Logger logger = LoggerFactory.getLogger(SimulationClient.class);
@@ -188,7 +190,7 @@ public class SimulationClient {
         }
     }
 
-    public void subscribeResults(String simulationId, List<String> filePatterns, boolean includeExisting,
+    public CancellableContext subscribeResults(String simulationId, List<String> filePatterns, boolean includeExisting,
                                  Consumer<FileData> fileHandler, Consumer<Throwable> onError) {
         SubscribeResultsRequest request = SubscribeResultsRequest.newBuilder()
                 .setSimulationId(simulationId)
@@ -196,22 +198,30 @@ public class SimulationClient {
                 .setIncludeExisting(includeExisting)
                 .build();
 
-        asyncStub.subscribeResults(request, new io.grpc.stub.StreamObserver<FileData>() {
-            @Override
-            public void onNext(FileData value) {
-                fileHandler.accept(value);
-            }
+        // Create a cancellable context for this subscription
+        CancellableContext context = Context.current().withCancellation();
+        
+        context.run(() -> {
+            asyncStub.subscribeResults(request, new io.grpc.stub.StreamObserver<FileData>() {
+                @Override
+                public void onNext(FileData value) {
+                    fileHandler.accept(value);
+                }
 
-            @Override
-            public void onError(Throwable t) {
-                logger.error("subscribeResults error", t);
-                if (onError != null) onError.accept(t);
-            }
+                @Override
+                public void onError(Throwable t) {
+                    logger.error("subscribeResults error", t);
+                    if (onError != null) onError.accept(t);
+                }
 
-            @Override
-            public void onCompleted() {
-                // keep-alive stream typically doesn't complete; noop
-            }
+                @Override
+                public void onCompleted() {
+                    logger.info("subscribeResults completed for simulation: {}", simulationId);
+                    // keep-alive stream typically doesn't complete; noop
+                }
+            });
         });
+        
+        return context;
     }
 }
